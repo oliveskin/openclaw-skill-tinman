@@ -1,8 +1,14 @@
 # Tinman Skill for OpenClaw
 
-Proactive AI failure-mode research for [OpenClaw](https://openclaw.ai).
+AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinman](https://github.com/oliveskin/Agent-Tinman).
 
-Tinman discovers prompt injection, tool misuse, context bleed, and other failure modes in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
+Discovers prompt injection, tool exfil, context bleed, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
+
+## What's New in v0.2.0
+
+- **`/tinman sweep`** - Proactive security testing with 80+ synthetic attack probes
+- **Tinman Integration** - Uses `FailureClassifier` for deep analysis
+- **Attack Categories** - Prompt injection, tool exfil, context bleed, privilege escalation
 
 ## Installation
 
@@ -16,26 +22,38 @@ cd tinman
 pip install -r requirements.txt
 ```
 
+Or install from ClawHub: https://clawhub.ai/oliveskin/agent-tinman
+
 ## Usage
 
 In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 
-```
+```bash
+# Scan real sessions for issues
 /tinman scan                         # Analyze last 24 hours
 /tinman scan --hours 48              # Analyze last 48 hours
 /tinman scan --focus prompt_injection
-/tinman report                       # View findings
-/tinman watch                        # Continuous monitoring
+
+# View findings
+/tinman report                       # View latest findings
+
+# Proactive security sweep (NEW)
+/tinman sweep                        # Run 80+ attack probes
+/tinman sweep --category tool_exfil  # Focus on exfiltration
+/tinman sweep --severity S3          # High severity only
+
+# Continuous monitoring
+/tinman watch                        # Hourly scans
 ```
 
-## What It Finds
+## Attack Categories
 
-| Category | Description | Mitigation |
-|----------|-------------|------------|
-| **Prompt Injection** | Jailbreaks, instruction override | SOUL.md guardrails |
-| **Tool Misuse** | Unauthorized access, exfil attempts | Sandbox denylist |
-| **Context Bleed** | Cross-session data leakage | Session isolation |
-| **Reasoning Failures** | Logic errors, hallucinations | Model selection |
+| Category | Attacks | Examples |
+|----------|---------|----------|
+| **Prompt Injection** | 15 | Jailbreaks, DAN, instruction override |
+| **Tool Exfiltration** | 18 | SSH keys, credentials, network exfil |
+| **Context Bleed** | 14 | Cross-session leaks, memory extraction |
+| **Privilege Escalation** | 15 | Sandbox escape, elevation bypass |
 
 ## Severity Levels
 
@@ -45,27 +63,11 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 - **S1**: Low - monitor
 - **S0**: Info - observation only
 
-## Configuration
-
-Create `~/.openclaw/workspace/tinman.yaml`:
-
-```yaml
-mode: shadow                    # shadow or lab
-focus:
-  - prompt_injection
-  - tool_use
-  - context_bleed
-severity_threshold: S2          # Minimum severity to report
-auto_watch: false               # Auto-start monitoring
-```
-
 ## How It Works
 
-1. Fetches recent sessions via OpenClaw's `sessions_*` tools
-2. Converts sessions to Tinman's trace format
-3. Runs failure classification with heuristics + patterns
-4. Generates actionable report with OpenClaw-specific mitigations
-5. Optionally runs in continuous watch mode
+1. **Scan**: Fetches recent sessions → Converts to Tinman trace format → Runs FailureClassifier
+2. **Sweep**: Runs synthetic attack probes → Tests defenses → Reports vulnerabilities
+3. **Report**: Generates actionable findings with OpenClaw-specific mitigations
 
 ## Privacy
 
@@ -78,13 +80,15 @@ auto_watch: false               # Auto-start monitoring
 
 - OpenClaw (any recent version)
 - Python 3.10+
-- tinman >= 0.1.60
+- AgentTinman >= 0.1.60
+- tinman-openclaw-eval >= 0.1.1
 
 ## Links
 
-- [Tinman](https://github.com/oliveskin/Agent-Tinman) - Forward-Deployed Research Agent
+- [AgentTinman](https://github.com/oliveskin/Agent-Tinman) - AI Failure Mode Research
+- [Eval Harness](https://github.com/oliveskin/tinman-openclaw-eval) - Security Testing
 - [OpenClaw](https://github.com/openclaw/openclaw) - Personal AI Assistant
-- [PyPI](https://pypi.org/project/AgentTinman/) - Tinman package
+- [ClawHub](https://clawhub.ai/oliveskin/agent-tinman) - Skill Registry
 
 ## License
 

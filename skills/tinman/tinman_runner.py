@@ -21,12 +21,20 @@ try:
     TINMAN_AVAILABLE = True
 except ImportError:
     TINMAN_AVAILABLE = False
-    print("Warning: tinman not installed. Run: pip install tinman>=0.1.60")
+    print("Warning: AgentTinman not installed. Run: pip install AgentTinman>=0.1.60")
+
+# Eval harness imports (for sweep command)
+try:
+    from tinman_openclaw_eval import EvalHarness, AttackCategory, Severity as EvalSeverity
+    EVAL_AVAILABLE = True
+except ImportError:
+    EVAL_AVAILABLE = False
 
 
 # OpenClaw workspace paths
 WORKSPACE = Path.home() / ".openclaw" / "workspace"
 FINDINGS_FILE = WORKSPACE / "tinman-findings.md"
+SWEEP_FILE = WORKSPACE / "tinman-sweep.md"
 CONFIG_FILE = WORKSPACE / "tinman.yaml"
 
 
@@ -409,6 +417,144 @@ async def run_watch(interval_minutes: int = 60, stop: bool = False) -> None:
         await asyncio.sleep(interval_minutes * 60)
 
 
+async def run_sweep(category: str = "all", severity: str = "S2") -> None:
+    """Run security sweep with synthetic attack probes."""
+    if not EVAL_AVAILABLE:
+        print("Error: tinman-openclaw-eval not installed.")
+        print("Run: pip install tinman-openclaw-eval")
+        return
+
+    print(f"Running security sweep (category: {category}, min severity: {severity})...")
+
+    # Initialize eval harness
+    harness = EvalHarness(use_tinman=TINMAN_AVAILABLE)
+
+    # Map category string to AttackCategory
+    category_map = {
+        "all": None,
+        "prompt_injection": AttackCategory.PROMPT_INJECTION,
+        "tool_exfil": AttackCategory.TOOL_EXFIL,
+        "context_bleed": AttackCategory.CONTEXT_BLEED,
+        "privilege_escalation": AttackCategory.PRIVILEGE_ESCALATION,
+    }
+
+    categories = None
+    if category != "all" and category in category_map:
+        categories = [category_map[category]]
+
+    # Run the sweep
+    result = await harness.run(
+        categories=categories,
+        min_severity=severity,
+        max_concurrent=3,
+    )
+
+    # Generate sweep report
+    report = generate_sweep_report(result)
+
+    # Write to file
+    SWEEP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SWEEP_FILE.write_text(report)
+
+    print(f"\nSweep complete!")
+    print(f"Results written to: {SWEEP_FILE}")
+    print(f"\nSummary:")
+    print(f"  Total attacks: {result.total_attacks}")
+    print(f"  Passed (blocked): {result.passed}")
+    print(f"  Failed: {result.failed}")
+    print(f"  Vulnerabilities: {result.vulnerabilities}")
+
+    if result.vulnerabilities > 0:
+        print(f"\n⚠️  WARNING: {result.vulnerabilities} potential vulnerabilities found!")
+        print("Review the sweep report for details.")
+
+
+def generate_sweep_report(result) -> str:
+    """Generate markdown report from sweep results."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    report = f"""# Tinman Security Sweep - {now}
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Total Attacks | {result.total_attacks} |
+| Blocked (Passed) | {result.passed} |
+| Not Blocked (Failed) | {result.failed} |
+| **Vulnerabilities** | **{result.vulnerabilities}** |
+| Tinman Analysis | {'Enabled' if result.tinman_enabled else 'Disabled'} |
+
+"""
+
+    # Group by category
+    by_category: dict[str, list] = {}
+    for r in result.results:
+        cat = r.category.value
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(r)
+
+    # Vulnerabilities section
+    vulns = [r for r in result.results if r.is_vulnerability]
+    if vulns:
+        report += "## Vulnerabilities Found\n\n"
+        for v in vulns:
+            report += f"""### [{v.severity.value}] {v.attack_name}
+
+**ID:** `{v.attack_id}`
+**Category:** {v.category.value.replace('_', ' ').title()}
+**Expected:** {v.expected.value}
+**Actual:** {v.actual.value}
+
+"""
+            # Add Tinman analysis if available
+            tinman_analysis = v.details.get("tinman_analysis")
+            if tinman_analysis:
+                report += f"""**Tinman Analysis:**
+- Primary Class: {tinman_analysis.get('primary_class', 'N/A')}
+- Confidence: {tinman_analysis.get('confidence', 0):.0%}
+- Severity: {tinman_analysis.get('severity', 'N/A')}
+
+"""
+            report += "---\n\n"
+    else:
+        report += "## No Vulnerabilities Found\n\n"
+        report += "All attacks were successfully blocked by the agent's defenses.\n\n"
+
+    # Results by category
+    report += "## Results by Category\n\n"
+    for cat, results in by_category.items():
+        passed = sum(1 for r in results if r.passed)
+        failed = sum(1 for r in results if not r.passed)
+        vulns_cat = sum(1 for r in results if r.is_vulnerability)
+        report += f"### {cat.replace('_', ' ').title()}\n\n"
+        report += f"- Total: {len(results)}\n"
+        report += f"- Blocked: {passed}\n"
+        report += f"- Not Blocked: {failed}\n"
+        report += f"- Vulnerabilities: {vulns_cat}\n\n"
+
+    # Recommendations
+    report += """## Recommendations
+
+"""
+    if result.vulnerabilities > 0:
+        report += """1. **Immediate**: Review vulnerabilities above and update security controls
+2. **Add to SOUL.md**: Guardrails for detected attack patterns
+3. **Update sandbox**: Add blocked paths/tools to denylist
+4. **Re-run sweep**: Verify fixes with `/tinman sweep`
+"""
+    else:
+        report += """All attacks were blocked. Consider:
+1. Running with lower severity threshold: `/tinman sweep --severity S1`
+2. Adding custom attack payloads for your specific use case
+3. Setting up continuous monitoring with `/tinman watch`
+"""
+
+    report += "\n---\n\n*Generated by Tinman Security Sweep*\n"
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tinman OpenClaw Skill")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
@@ -431,7 +577,12 @@ def main():
 
     # sweep command
     sweep_parser = subparsers.add_parser("sweep", help="Security sweep with synthetic probes")
-    sweep_parser.add_argument("--category", default="all", help="Attack category")
+    sweep_parser.add_argument("--category", default="all",
+                             choices=["all", "prompt_injection", "tool_exfil", "context_bleed", "privilege_escalation"],
+                             help="Attack category")
+    sweep_parser.add_argument("--severity", default="S2",
+                             choices=["S0", "S1", "S2", "S3", "S4"],
+                             help="Minimum severity level")
 
     args = parser.parse_args()
 
@@ -442,7 +593,7 @@ def main():
     elif args.command == "watch":
         asyncio.run(run_watch(args.interval, args.stop))
     elif args.command == "sweep":
-        print("Security sweep not yet implemented - coming in v0.2.0")
+        asyncio.run(run_sweep(args.category, args.severity))
     else:
         parser.print_help()
 

@@ -1,7 +1,7 @@
 ---
 name: tinman
-version: 0.1.0
-description: Proactive AI failure-mode research - discovers prompt injection, tool misuse, context bleed, and proposes mitigations
+version: 0.2.0
+description: AI security scanner - discovers prompt injection, tool exfil, context bleed with 80+ attack probes
 author: oliveskin
 repository: https://github.com/oliveskin/openclaw-skill-tinman
 license: Apache-2.0
@@ -13,7 +13,9 @@ requires:
   env: []
 
 install:
-  pip: tinman>=0.1.60
+  pip:
+    - AgentTinman>=0.1.60
+    - tinman-openclaw-eval>=0.1.1
 
 permissions:
   tools:
@@ -75,13 +77,24 @@ Continuous monitoring mode (runs in background).
 
 ### `/tinman sweep`
 
-Run targeted security sweep with synthetic probes.
+Run proactive security sweep with 80+ synthetic attack probes.
 
 ```
-/tinman sweep                   # Full security sweep
-/tinman sweep --category prompt_injection
-/tinman sweep --category tool_exfil
+/tinman sweep                              # Full sweep, S2+ severity
+/tinman sweep --severity S3                # High severity only
+/tinman sweep --category prompt_injection  # Jailbreaks, DAN, etc.
+/tinman sweep --category tool_exfil        # SSH keys, credentials
+/tinman sweep --category context_bleed     # Cross-session leaks
+/tinman sweep --category privilege_escalation
 ```
+
+**Attack Categories:**
+- `prompt_injection` (15 attacks): Jailbreaks, DAN, instruction override
+- `tool_exfil` (18 attacks): SSH keys, credentials, network exfil
+- `context_bleed` (14 attacks): Cross-session leaks, memory extraction
+- `privilege_escalation` (15 attacks): Sandbox escape, elevation bypass
+
+**Output:** Writes sweep report to `~/.openclaw/workspace/tinman-sweep.md`
 
 ## Failure Categories
 
