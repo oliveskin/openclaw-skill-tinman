@@ -1,7 +1,7 @@
 ---
 name: tinman
-version: 0.2.0
-description: AI security scanner - discovers prompt injection, tool exfil, context bleed with 80+ attack probes
+version: 0.3.0
+description: AI security scanner - discovers prompt injection, tool exfil, context bleed with 80+ attack probes and real-time monitoring
 author: oliveskin
 repository: https://github.com/oliveskin/openclaw-skill-tinman
 license: Apache-2.0
@@ -15,7 +15,7 @@ requires:
 install:
   pip:
     - AgentTinman>=0.1.60
-    - tinman-openclaw-eval>=0.1.1
+    - tinman-openclaw-eval>=0.1.2
 
 permissions:
   tools:
@@ -67,12 +67,29 @@ Display the latest findings report.
 
 ### `/tinman watch`
 
-Continuous monitoring mode (runs in background).
+Continuous monitoring mode with two options:
 
+**Real-time mode (recommended):** Connects to Gateway WebSocket for instant event monitoring.
 ```
-/tinman watch                   # Default: hourly scans
-/tinman watch --interval 30m    # Every 30 minutes
-/tinman watch stop              # Stop monitoring
+/tinman watch                           # Real-time via ws://127.0.0.1:18789
+/tinman watch --gateway ws://host:port  # Custom gateway URL
+/tinman watch --interval 5              # Analysis every 5 minutes
+```
+
+**Polling mode:** Periodic session scans (fallback when gateway unavailable).
+```
+/tinman watch --mode polling            # Hourly scans
+/tinman watch --mode polling --interval 30  # Every 30 minutes
+```
+
+**Heartbeat Integration:** For scheduled scans, configure in heartbeat:
+```yaml
+# In gateway heartbeat config
+heartbeat:
+  jobs:
+    - name: tinman-security-scan
+      schedule: "0 * * * *"  # Every hour
+      command: /tinman scan --hours 1
 ```
 
 ### `/tinman sweep`
