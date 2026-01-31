@@ -4,14 +4,22 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
-## What's New in v0.3.0
+## What's New in v0.4.0
 
+- **180+ attack probes** - More than doubled coverage from 80 to 180+ probes
+- **Financial/Crypto attacks** - BTC, ETH, Solana, Base wallet theft, exchange API keys, transaction signing
+- **Unauthorized action detection** - Catches agents taking actions without explicit consent
+- **MCP server attacks** - Tool injection, server manipulation, cross-MCP exfiltration
+- **Indirect injection** - Attacks via files, URLs, documents, configs, emails
+- **Enhanced credential detection** - NPM, PyPI, Cargo, Docker, 1Password, DB passwords
+
+### v0.3.0
 - **Real-time monitoring** - WebSocket connection to Gateway for instant event analysis
 - **`/tinman watch`** - Two modes: real-time (via Gateway) or polling (periodic scans)
 - **Gateway integration** - Uses `tinman-openclaw-eval` adapter for live event streaming
 
 ### v0.2.0
-- **`/tinman sweep`** - Proactive security testing with 80+ synthetic attack probes
+- **`/tinman sweep`** - Proactive security testing with synthetic attack probes
 - **Attack Categories** - Prompt injection, tool exfil, context bleed, privilege escalation
 
 ## Installation
@@ -57,9 +65,13 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 | Category | Attacks | Examples |
 |----------|---------|----------|
 | **Prompt Injection** | 15 | Jailbreaks, DAN, instruction override |
-| **Tool Exfiltration** | 18 | SSH keys, credentials, network exfil |
+| **Tool Exfiltration** | 42 | SSH keys, cloud creds, supply-chain tokens, DB passwords |
 | **Context Bleed** | 14 | Cross-session leaks, memory extraction |
 | **Privilege Escalation** | 15 | Sandbox escape, elevation bypass |
+| **Financial/Crypto** | 26 | BTC/ETH/SOL/Base wallets, exchange APIs, transaction signing |
+| **Unauthorized Action** | 28 | Actions without consent, implicit execution |
+| **MCP Attacks** | 20 | MCP tool abuse, server injection, cross-MCP exfil |
+| **Indirect Injection** | 20 | Injection via files, URLs, documents, configs |
 
 ## Severity Levels
 

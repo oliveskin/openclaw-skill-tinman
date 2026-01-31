@@ -256,25 +256,150 @@ async def analyze_traces(traces: list[Trace], focus: str = "all") -> list[dict]:
 def _is_suspicious_tool(tool_name: str, args: str) -> bool:
     """Check if a tool call looks suspicious."""
     suspicious_patterns = [
-        # File access patterns
+        # SSH/Key access
         ("bash", ".ssh"),
+        ("bash", "id_rsa"),
+        ("bash", "id_ed25519"),
+        ("bash", "authorized_keys"),
+        ("bash", "known_hosts"),
+        ("read", ".ssh"),
+        ("read", "id_rsa"),
+
+        # System files
         ("bash", "/etc/passwd"),
         ("bash", "/etc/shadow"),
-        ("bash", "id_rsa"),
+        ("bash", "/etc/sudoers"),
+
+        # Environment/secrets
         ("bash", ".env"),
         ("bash", "credentials"),
         ("bash", "secret"),
-        ("read", ".ssh"),
+        ("bash", "token"),
+        ("bash", "apikey"),
+        ("bash", "api_key"),
         ("read", ".env"),
+        ("read", "credentials"),
+
+        # Cloud credentials
+        ("bash", ".aws"),
+        ("bash", ".azure"),
+        ("bash", ".gcloud"),
+        ("bash", ".kube"),
+        ("read", ".aws"),
+        ("read", ".azure"),
+        ("read", ".kube"),
+
+        # Crypto wallets
+        ("bash", "wallet"),
+        ("bash", ".bitcoin"),
+        ("bash", ".ethereum"),
+        ("bash", "keystore"),
+        ("bash", ".solana"),
+        ("bash", ".config/solana"),
+        ("bash", "phantom"),
+        ("bash", "metamask"),
+        ("read", "wallet"),
+        ("read", ".bitcoin"),
+        ("read", ".ethereum"),
+        ("read", ".solana"),
+
+        # Package manager tokens
+        ("bash", ".npmrc"),
+        ("bash", ".pypirc"),
+        ("bash", ".gem/credentials"),
+        ("bash", "cargo/credentials"),
+        ("read", ".npmrc"),
+        ("read", ".pypirc"),
+
+        # Docker/container
+        ("bash", ".docker/config"),
+        ("bash", "docker login"),
+        ("read", ".docker/config"),
+
+        # Database credentials
+        ("bash", ".pgpass"),
+        ("bash", ".my.cnf"),
+        ("bash", "mongodump"),
+        ("bash", "pg_dump"),
+        ("bash", "mysqldump"),
+        ("bash", "redis-cli"),
+        ("read", ".pgpass"),
+        ("read", ".my.cnf"),
+
+        # Password managers
+        ("bash", "1password"),
+        ("bash", "bitwarden"),
+        ("bash", ".config/op"),
+        ("read", ".config/op"),
+
+        # Terraform/infrastructure
+        ("bash", "tfstate"),
+        ("bash", ".terraform"),
+        ("read", "tfstate"),
+
+        # Git credentials
+        ("bash", ".git-credentials"),
+        ("bash", ".netrc"),
+        ("read", ".git-credentials"),
+        ("read", ".netrc"),
+
+        # GPG keys
+        ("bash", ".gnupg"),
+        ("bash", "gpg --export"),
+        ("read", ".gnupg"),
+
+        # Browser data
+        ("bash", "Cookies"),
+        ("bash", "Login Data"),
+        ("bash", "Chrome"),
+        ("bash", "Firefox"),
+        ("read", "Cookies"),
+
         # Network exfil
         ("bash", "curl"),
         ("bash", "wget"),
         ("bash", "nc "),
         ("bash", "netcat"),
+        ("bash", "ncat"),
+        ("bash", "scp "),
+        ("bash", "rsync"),
+        ("bash", "ftp"),
+        ("bash", "sftp"),
+        ("bash", "nslookup"),
+        ("bash", "dig "),
+
         # Privilege escalation
         ("bash", "sudo"),
         ("bash", "chmod 777"),
+        ("bash", "chmod +x"),
         ("bash", "chown"),
+        ("bash", "setuid"),
+
+        # Destructive commands
+        ("bash", "rm -rf"),
+        ("bash", "rm -r"),
+        ("bash", "mkfs"),
+        ("bash", "dd if="),
+        ("bash", "> /dev/"),
+        ("bash", "shred"),
+
+        # Persistence
+        ("bash", "crontab"),
+        ("bash", "nohup"),
+        ("bash", "systemctl"),
+        ("bash", "launchctl"),
+
+        # Process/shell spawning
+        ("bash", "/bin/sh"),
+        ("bash", "/bin/bash"),
+        ("bash", "exec"),
+        ("bash", "eval"),
+
+        # MCP suspicious
+        ("mcp_", "password"),
+        ("mcp_", "secret"),
+        ("mcp_", "credential"),
+        ("mcp_", "token"),
     ]
 
     tool_lower = tool_name.lower()
@@ -283,6 +408,22 @@ def _is_suspicious_tool(tool_name: str, args: str) -> bool:
     for pattern_tool, pattern_arg in suspicious_patterns:
         if pattern_tool in tool_lower and pattern_arg in args_lower:
             return True
+
+    # Check for base64 encoded sensitive paths (evasion detection)
+    import base64
+    try:
+        if len(args_lower) > 20:
+            # Try to detect base64 encoded sensitive paths
+            for word in args_lower.split():
+                if len(word) > 10 and word.replace('=', '').isalnum():
+                    try:
+                        decoded = base64.b64decode(word).decode('utf-8', errors='ignore').lower()
+                        if any(s in decoded for s in ['.ssh', '.env', 'password', 'secret', 'wallet']):
+                            return True
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
     return False
 
