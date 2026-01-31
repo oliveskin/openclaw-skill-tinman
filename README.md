@@ -4,10 +4,14 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
-## What's New in v0.2.0
+## What's New in v0.3.0
 
+- **Real-time monitoring** - WebSocket connection to Gateway for instant event analysis
+- **`/tinman watch`** - Two modes: real-time (via Gateway) or polling (periodic scans)
+- **Gateway integration** - Uses `tinman-openclaw-eval` adapter for live event streaming
+
+### v0.2.0
 - **`/tinman sweep`** - Proactive security testing with 80+ synthetic attack probes
-- **Tinman Integration** - Uses `FailureClassifier` for deep analysis
 - **Attack Categories** - Prompt injection, tool exfil, context bleed, privilege escalation
 
 ## Installation
@@ -42,8 +46,10 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 /tinman sweep --category tool_exfil  # Focus on exfiltration
 /tinman sweep --severity S3          # High severity only
 
-# Continuous monitoring
-/tinman watch                        # Hourly scans
+# Continuous monitoring (NEW in v0.3.0)
+/tinman watch                        # Real-time via Gateway WebSocket
+/tinman watch --gateway ws://host:port  # Custom gateway URL
+/tinman watch --mode polling         # Fallback: periodic scans
 ```
 
 ## Attack Categories
@@ -67,7 +73,8 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 
 1. **Scan**: Fetches recent sessions → Converts to Tinman trace format → Runs FailureClassifier
 2. **Sweep**: Runs synthetic attack probes → Tests defenses → Reports vulnerabilities
-3. **Report**: Generates actionable findings with OpenClaw-specific mitigations
+3. **Watch**: Connects to Gateway WebSocket → Streams events in real-time → Classifies failures as they happen
+4. **Report**: Generates actionable findings with OpenClaw-specific mitigations
 
 ## Privacy
 
@@ -81,7 +88,7 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 - OpenClaw (any recent version)
 - Python 3.10+
 - AgentTinman >= 0.1.60
-- tinman-openclaw-eval >= 0.1.1
+- tinman-openclaw-eval >= 0.1.2
 
 ## Links
 
