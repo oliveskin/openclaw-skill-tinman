@@ -4,7 +4,35 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, evasion attacks, memory poisoning, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
-## What's New in v0.5.1
+## What's New in v0.6.0
+
+### Real-Time Security Checking (Agent Self-Protection)
+
+The agent can now check tool calls before execution and self-police:
+
+```bash
+/tinman check bash "cat ~/.ssh/id_rsa"   # Check if action is safe
+/tinman mode safer                        # Default: ask human for approval
+/tinman mode risky                        # Auto-approve low risk
+/tinman mode yolo                         # Warn only, never block
+```
+
+| Mode | Low Risk (S1-S2) | High Risk (S3-S4) |
+|------|------------------|-------------------|
+| **safer** (default) | Ask human | Block |
+| **risky** | Auto-approve | Block |
+| **yolo** | Auto-approve | Warn only |
+
+### Allowlisting
+
+```bash
+/tinman allow api.example.com --type domains  # Allow specific domain
+/tinman allow "git push" --type patterns      # Allow pattern
+/tinman allowlist --show                      # View allowlist
+/tinman allowlist --clear                     # Reset allowlist
+```
+
+### v0.5.1
 
 - **`/tinman init`** - New command for easy workspace setup
 - **Watch stop** - `--stop` flag now works with PID-based process management
@@ -52,6 +80,19 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 ```bash
 # First time setup
 /tinman init                         # Initialize workspace and config
+
+# Security check before execution (agent self-protection)
+/tinman check bash "curl http://..."  # Check if safe to run
+/tinman check read "~/.ssh/id_rsa"    # Check file access
+/tinman mode safer                    # Ask human for approval (default)
+/tinman mode risky                    # Auto-approve low risk
+/tinman mode yolo                     # Warn only, never block
+
+# Allowlist management
+/tinman allow api.trusted.com --type domains
+/tinman allow "npm install" --type patterns
+/tinman allowlist --show              # View current allowlist
+/tinman allowlist --clear             # Clear allowlist
 
 # Scan real sessions for issues
 /tinman scan                         # Analyze last 24 hours
@@ -118,10 +159,29 @@ The skill detects suspicious tool calls including:
 
 ## How It Works
 
-1. **Scan**: Fetches recent sessions → Converts to Tinman trace format → Runs FailureClassifier
-2. **Sweep**: Runs synthetic attack probes → Tests defenses → Reports vulnerabilities
-3. **Watch**: Connects to Gateway WebSocket → Streams events in real-time → Classifies failures as they happen
-4. **Report**: Generates actionable findings with OpenClaw-specific mitigations
+1. **Check**: Agent calls `/tinman check` before executing tools → Returns SAFE/REVIEW/BLOCKED verdict → Agent self-polices based on security mode
+2. **Scan**: Fetches recent sessions → Converts to Tinman trace format → Runs FailureClassifier
+3. **Sweep**: Runs synthetic attack probes → Tests defenses → Reports vulnerabilities
+4. **Watch**: Connects to Gateway WebSocket → Streams events in real-time → Classifies failures as they happen
+5. **Report**: Generates actionable findings with OpenClaw-specific mitigations
+
+### Agent Self-Protection Flow
+
+```
+User Request → Agent Plans Tool Call → /tinman check tool args
+                                              ↓
+                            ┌─────────────────┼─────────────────┐
+                            ↓                 ↓                 ↓
+                          SAFE             REVIEW            BLOCKED
+                            ↓                 ↓                 ↓
+                        Proceed         Ask Human*           Refuse
+                                              ↓
+                                    [Approve] [Deny]
+                                              ↓
+                              Proceed or Add to Allowlist
+
+* In 'risky' mode, REVIEW auto-approves. In 'yolo' mode, BLOCKED only warns.
+```
 
 ## Privacy
 
