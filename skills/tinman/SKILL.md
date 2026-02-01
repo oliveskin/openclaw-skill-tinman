@@ -1,6 +1,6 @@
 ---
 name: tinman
-version: 0.5.0
+version: 0.5.1
 description: AI security scanner - discovers prompt injection, tool exfil, context bleed, crypto wallet theft, unauthorized actions, evasion attacks, memory poisoning with 270+ attack probes and real-time monitoring
 author: oliveskin
 repository: https://github.com/oliveskin/openclaw-skill-tinman
