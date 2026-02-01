@@ -6,17 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **Security Check System** - `/tinman check <tool> <args>` for pre-execution security verification
-- **Security Modes** - Three protection levels: `safer` (default), `risky`, `yolo`
-  - `safer`: Ask human for REVIEW actions, block high-risk
-  - `risky`: Auto-approve REVIEW, still block S4 critical
-  - `yolo`: Warn only, never block (for testing/research)
+- **Security Modes** - `/tinman mode <level>` with three protection levels:
+  | Mode | SAFE | REVIEW (S1-S2) | BLOCKED (S3-S4) |
+  |------|------|----------------|-----------------|
+  | `safer` (default) | Proceed | Ask human | Block |
+  | `risky` | Proceed | Auto-approve | Block |
+  | `yolo` | Proceed | Auto-approve | Warn only |
 - **Allowlist Management** - `/tinman allow` and `/tinman allowlist` commands
 - **Verdict System** - SAFE/REVIEW/BLOCKED with severity, confidence, and recommendations
-- **Pattern Categories** - 12 categorized pattern groups (credential_theft, crypto_wallet, windows_attack, etc.)
+- **168 Detection Patterns** across 16 categories:
+  - credential_theft (39), windows_attack (32), crypto_wallet (15)
+  - linux_persistence (12), network_exfil (11), macos_attack (9)
+  - shell_injection (7), browser_data (6), destructive (6)
+  - privilege_escalation (5), mcp_attack (5), git_hooks (5)
+  - cloud_metadata (4), container_escape (4), process_spawn (4), evasion (4)
+- **Agent Self-Protection** - Add to SOUL.md for autonomous security enforcement
 
 ### Changed
 - Refactored suspicious tool detection to use new CheckResult system
-- Removed legacy pattern checking (replaced by run_check())
+- Consolidated all legacy patterns into categorized PATTERN_CATEGORIES
 
 ## [0.5.1] - 2026-02-01
 
