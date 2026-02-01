@@ -4,8 +4,13 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, evasion attacks, memory poisoning, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
-## What's New in v0.5.0
+## What's New in v0.5.1
 
+- **`/tinman init`** - New command for easy workspace setup
+- **Watch stop** - `--stop` flag now works with PID-based process management
+- **Bug fix** - Fixed crash when tool args are dict instead of string
+
+### v0.5.0
 - **270+ attack probes** - Expanded from 180 to 270+ probes across 13 categories
 - **Evasion/Bypass detection** - Unicode homoglyphs, URL/base64/hex encoding, shell injection
 - **Memory poisoning attacks** - Context injection, RAG poisoning, history fabrication
@@ -45,6 +50,9 @@ Or install from ClawHub: https://clawhub.ai/oliveskin/agent-tinman
 In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 
 ```bash
+# First time setup
+/tinman init                         # Initialize workspace and config
+
 # Scan real sessions for issues
 /tinman scan                         # Analyze last 24 hours
 /tinman scan --hours 48              # Analyze last 48 hours
@@ -64,6 +72,7 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 /tinman watch                        # Real-time via Gateway WebSocket
 /tinman watch --gateway ws://host:port  # Custom gateway URL
 /tinman watch --mode polling         # Fallback: periodic scans
+/tinman watch --stop                 # Stop background watch process
 ```
 
 ## Attack Categories
