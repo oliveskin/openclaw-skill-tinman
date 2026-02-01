@@ -7,6 +7,8 @@ This script bridges OpenClaw sessions to Tinman's failure-mode research engine.
 import argparse
 import asyncio
 import json
+import os
+import signal
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,6 +52,7 @@ WORKSPACE = Path.home() / ".openclaw" / "workspace"
 FINDINGS_FILE = WORKSPACE / "tinman-findings.md"
 SWEEP_FILE = WORKSPACE / "tinman-sweep.md"
 CONFIG_FILE = WORKSPACE / "tinman.yaml"
+WATCH_PID_FILE = WORKSPACE / "tinman-watch.pid"
 
 
 def load_config() -> dict[str, Any]:
@@ -63,6 +66,37 @@ def load_config() -> dict[str, Any]:
         "severity_threshold": "S2",
         "auto_watch": False,
     }
+
+
+def init_workspace() -> None:
+    """Initialize Tinman workspace with default config."""
+    import yaml
+
+    # Create workspace directory
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    print(f"Workspace: {WORKSPACE}")
+
+    # Create default config if not exists
+    if not CONFIG_FILE.exists():
+        default_config = {
+            "mode": "shadow",
+            "focus": ["prompt_injection", "tool_use", "context_bleed"],
+            "severity_threshold": "S2",
+            "auto_watch": False,
+        }
+        CONFIG_FILE.write_text(yaml.dump(default_config, default_flow_style=False))
+        print(f"Created config: {CONFIG_FILE}")
+    else:
+        print(f"Config exists: {CONFIG_FILE}")
+
+    # Create sessions directory
+    sessions_dir = WORKSPACE / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\nTinman initialized. Next steps:")
+    print("  /tinman scan     - Analyze recent sessions")
+    print("  /tinman sweep    - Run security probes")
+    print("  /tinman watch    - Start continuous monitoring")
 
 
 async def get_sessions(hours: int = 24) -> list[dict]:
@@ -253,8 +287,13 @@ async def analyze_traces(traces: list[Trace], focus: str = "all") -> list[dict]:
     return findings
 
 
-def _is_suspicious_tool(tool_name: str, args: str) -> bool:
-    """Check if a tool call looks suspicious."""
+def _is_suspicious_tool(tool_name: str, args: Any) -> bool:
+    """Check if a tool call looks suspicious.
+
+    Args:
+        tool_name: Name of the tool being called
+        args: Tool arguments (can be str or dict)
+    """
     suspicious_patterns = [
         # SSH/Key access
         ("bash", ".ssh"),
@@ -507,7 +546,13 @@ def _is_suspicious_tool(tool_name: str, args: str) -> bool:
     ]
 
     tool_lower = tool_name.lower()
-    args_lower = args.lower() if args else ""
+
+    # Handle both dict and string args
+    if isinstance(args, dict):
+        args_str = json.dumps(args)
+    else:
+        args_str = str(args) if args else ""
+    args_lower = args_str.lower()
 
     for pattern_tool, pattern_arg in suspicious_patterns:
         if pattern_tool in tool_lower and pattern_arg in args_lower:
@@ -531,23 +576,23 @@ def _is_suspicious_tool(tool_name: str, args: str) -> bool:
 
     # Check for Unicode bypass attempts
     import unicodedata
-    if args:
+    if args_str:
         try:
-            normalized = unicodedata.normalize('NFKC', args).lower()
+            normalized = unicodedata.normalize('NFKC', args_str).lower()
             # If normalization changes the string significantly, might be evasion
             if normalized != args_lower:
                 sensitive_after_norm = ['.ssh', '.env', 'passwd', 'shadow', 'secret', 'credential', 'wallet']
                 if any(s in normalized for s in sensitive_after_norm):
                     return True
             # Check for zero-width characters
-            if any(ord(c) in [0x200B, 0x200C, 0x200D, 0xFEFF] for c in args):
+            if any(ord(c) in [0x200B, 0x200C, 0x200D, 0xFEFF] for c in args_str):
                 return True
         except Exception:
             pass
 
     # Check for hex/octal encoded paths
     import re
-    if args:
+    if args_str:
         # Hex encoding: \x2f = /
         if re.search(r'\\x[0-9a-f]{2}', args_lower):
             return True
@@ -707,21 +752,57 @@ async def run_watch(
 
     Args:
         interval_minutes: Scan interval for polling mode
-        stop: Stop watching (not yet implemented)
+        stop: Stop watching
         gateway_url: WebSocket URL for OpenClaw Gateway
         mode: 'realtime' (WebSocket) or 'polling' (periodic scans)
     """
     if stop:
-        # Would need a PID file or similar to implement stop
-        print("Watch mode stop not yet implemented")
+        if WATCH_PID_FILE.exists():
+            try:
+                pid = int(WATCH_PID_FILE.read_text().strip())
+                os.kill(pid, signal.SIGTERM)
+                WATCH_PID_FILE.unlink()
+                print(f"Stopped watch mode (PID {pid})")
+            except ValueError:
+                print("Error: Invalid PID file")
+                WATCH_PID_FILE.unlink()
+            except ProcessLookupError:
+                print("Watch process not running (stale PID file removed)")
+                WATCH_PID_FILE.unlink()
+            except PermissionError:
+                print(f"Error: Cannot stop process (PID {pid}). Try manually.")
+        else:
+            print("Watch mode is not running")
         return
 
-    # Real-time mode with gateway monitoring
-    if mode == "realtime" and GATEWAY_AVAILABLE:
-        await run_watch_realtime(gateway_url, interval_minutes)
-    else:
-        # Fallback to polling mode
-        await run_watch_polling(interval_minutes)
+    # Check if already running
+    if WATCH_PID_FILE.exists():
+        try:
+            pid = int(WATCH_PID_FILE.read_text().strip())
+            # Check if process is actually running
+            os.kill(pid, 0)
+            print(f"Watch mode already running (PID {pid}). Use --stop first.")
+            return
+        except (ProcessLookupError, ValueError):
+            # Stale PID file, remove it
+            WATCH_PID_FILE.unlink()
+
+    # Write PID file
+    WATCH_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    WATCH_PID_FILE.write_text(str(os.getpid()))
+    print(f"Started watch mode (PID {os.getpid()})")
+
+    try:
+        # Real-time mode with gateway monitoring
+        if mode == "realtime" and GATEWAY_AVAILABLE:
+            await run_watch_realtime(gateway_url, interval_minutes)
+        else:
+            # Fallback to polling mode
+            await run_watch_polling(interval_minutes)
+    finally:
+        # Clean up PID file on exit
+        if WATCH_PID_FILE.exists():
+            WATCH_PID_FILE.unlink()
 
 
 async def run_watch_realtime(gateway_url: str, analysis_interval: int = 5) -> None:
@@ -932,6 +1013,9 @@ def main():
     parser = argparse.ArgumentParser(description="Tinman OpenClaw Skill")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
+    # init command
+    subparsers.add_parser("init", help="Initialize Tinman workspace")
+
     # scan command
     scan_parser = subparsers.add_parser("scan", help="Analyze recent sessions")
     scan_parser.add_argument("--hours", type=int, default=24, help="Hours to analyze")
@@ -962,7 +1046,9 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "scan":
+    if args.command == "init":
+        init_workspace()
+    elif args.command == "scan":
         asyncio.run(run_scan(args.hours, args.focus))
     elif args.command == "report":
         asyncio.run(show_report(args.full))

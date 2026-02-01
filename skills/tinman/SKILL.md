@@ -42,6 +42,16 @@ Tinman is a forward-deployed research agent that discovers unknown failure modes
 
 ## Commands
 
+### `/tinman init`
+
+Initialize Tinman workspace with default configuration.
+
+```
+/tinman init                    # Creates ~/.openclaw/workspace/tinman.yaml
+```
+
+Run this first time to set up the workspace.
+
 ### `/tinman scan`
 
 Analyze recent sessions for failure modes.
@@ -80,6 +90,11 @@ Continuous monitoring mode with two options:
 ```
 /tinman watch --mode polling            # Hourly scans
 /tinman watch --mode polling --interval 30  # Every 30 minutes
+```
+
+**Stop watching:**
+```
+/tinman watch --stop                    # Stop background watch process
 ```
 
 **Heartbeat Integration:** For scheduled scans, configure in heartbeat:
