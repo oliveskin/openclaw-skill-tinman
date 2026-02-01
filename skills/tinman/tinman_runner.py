@@ -218,32 +218,67 @@ def is_allowlisted(tool_name: str, args_str: str) -> bool:
 # Pattern categories for detailed reporting
 PATTERN_CATEGORIES = {
     "credential_theft": [
-        ".ssh", "id_rsa", "id_ed25519", "authorized_keys", ".env", "credentials",
-        "secret", "token", "apikey", "api_key", ".aws", ".azure", ".gcloud",
-        ".kube", ".npmrc", ".pypirc", ".docker/config", ".pgpass", ".my.cnf",
-        ".git-credentials", ".netrc", "password", "passwd", "shadow"
+        # SSH/Keys
+        ".ssh", "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
+        # Environment/secrets
+        ".env", "credentials", "secret", "token", "apikey", "api_key",
+        # Cloud credentials
+        ".aws", ".azure", ".gcloud", ".kube",
+        # Package managers
+        ".npmrc", ".pypirc", ".gem/credentials", "cargo/credentials",
+        # Docker
+        ".docker/config",
+        # Database
+        ".pgpass", ".my.cnf", "mongodump", "pg_dump", "mysqldump", "redis-cli",
+        # Password managers
+        "1password", "bitwarden", ".config/op",
+        # Terraform
+        "tfstate", ".terraform",
+        # Git credentials
+        ".git-credentials", ".netrc",
+        # GPG
+        ".gnupg", "gpg --export",
+        # System
+        "password", "passwd", "shadow", "/etc/sudoers",
     ],
     "crypto_wallet": [
-        "wallet", ".bitcoin", ".ethereum", "keystore", ".solana", "phantom",
-        "metamask", ".base", "coinbase", "ledger", "trezor", "seed phrase",
-        "mnemonic", "recovery phrase"
+        "wallet", ".bitcoin", ".ethereum", "keystore", ".solana", ".config/solana",
+        "phantom", "metamask", ".base", "coinbase", "ledger", "trezor",
+        "seed phrase", "mnemonic", "recovery phrase"
+    ],
+    "browser_data": [
+        "Cookies", "Login Data", "Chrome", "Firefox", "Safari", "Brave"
     ],
     "windows_attack": [
-        "mimikatz", "sekurlsa", "lsadump", "procdump", "lsass", "schtasks",
-        "powershell", "-enc", "encodedcommand", "iex", "invoke-expression",
-        "downloadstring", "net.webclient", "amsiutils", "certutil", "reg add",
-        "hklm\\sam", "wmic"
+        # Mimikatz/credential dumping
+        "mimikatz", "sekurlsa", "lsadump", "procdump", "lsass",
+        # Scheduled tasks
+        "schtasks", "/create /tn", "/ru SYSTEM",
+        # PowerShell
+        "powershell", "-enc", "-encodedcommand", "iex", "invoke-expression",
+        "downloadstring", "downloadfile", "net.webclient",
+        "-ep bypass", "-executionpolicy bypass", "amsiutils",
+        # Certutil
+        "certutil", "-urlcache", "-decode", "-encode",
+        # Registry
+        "reg add", "reg save", "reg export",
+        "hklm\\sam", "hklm\\system", "currentversion\\run",
+        # WMI
+        "wmic", "process call create", "__eventfilter",
     ],
     "macos_attack": [
-        "dump-keychain", "find-generic-password", "login.keychain", "osascript",
-        "launchagents", "launchdaemons", ".plist"
+        "dump-keychain", "find-generic-password", "login.keychain",
+        "osascript", "launchagents", "launchdaemons", ".plist",
+        "launchctl", "login item"
     ],
     "linux_persistence": [
-        "crontab", "systemctl", "/etc/systemd", "systemd/system", "/proc/",
-        "/proc/*/mem", "/proc/*/environ"
+        "crontab", "nohup", "systemctl", "systemctl enable", "systemctl start",
+        "/etc/systemd", "systemd/system", "systemd/user",
+        "/proc/", "/proc/*/mem", "/proc/*/environ", "/proc/*/maps"
     ],
     "network_exfil": [
-        "curl", "wget", "nc ", "netcat", "scp ", "rsync", "ftp", "nslookup"
+        "curl", "wget", "nc ", "netcat", "ncat", "scp ", "rsync",
+        "ftp", "sftp", "nslookup", "dig "
     ],
     "cloud_metadata": [
         "169.254.169.254", "metadata/identity", "computemetadata", "meta-data/iam"
@@ -253,6 +288,15 @@ PATTERN_CATEGORIES = {
     ],
     "shell_injection": [
         "$(", "`", "${", "ifs=", "; ", "| sh", "| bash"
+    ],
+    "process_spawn": [
+        "/bin/sh", "/bin/bash", "exec ", "eval "
+    ],
+    "mcp_attack": [
+        "mcp_", "mcp_password", "mcp_secret", "mcp_credential", "mcp_token"
+    ],
+    "git_hooks": [
+        ".git/hooks", "git-templates", "pre-commit", "post-checkout", "post-merge"
     ],
     "evasion": [
         "base64", "\\x", "\\0", "%2f"
@@ -269,6 +313,7 @@ PATTERN_CATEGORIES = {
 SEVERITY_MAP = {
     "credential_theft": "S4",
     "crypto_wallet": "S4",
+    "browser_data": "S3",
     "windows_attack": "S4",
     "macos_attack": "S3",
     "linux_persistence": "S3",
@@ -276,6 +321,9 @@ SEVERITY_MAP = {
     "cloud_metadata": "S4",
     "container_escape": "S4",
     "shell_injection": "S3",
+    "process_spawn": "S2",
+    "mcp_attack": "S3",
+    "git_hooks": "S3",
     "evasion": "S2",
     "destructive": "S3",
     "privilege_escalation": "S3",
@@ -297,6 +345,7 @@ def _get_recommendation(category: str, pattern: str) -> str:
     recommendations = {
         "credential_theft": "Never allow access to credential files. Review why this is needed.",
         "crypto_wallet": "Block all crypto wallet access. This could lead to financial loss.",
+        "browser_data": "Browser data contains sensitive info. Block unless explicitly needed.",
         "windows_attack": "This matches known Windows attack patterns. Block immediately.",
         "macos_attack": "This matches macOS persistence/credential access patterns.",
         "linux_persistence": "This could establish persistent access. Review carefully.",
@@ -304,6 +353,9 @@ def _get_recommendation(category: str, pattern: str) -> str:
         "cloud_metadata": "Cloud metadata access can expose credentials. Block in production.",
         "container_escape": "Container escape attempt detected. Block immediately.",
         "shell_injection": "Possible shell injection. Sanitize inputs.",
+        "process_spawn": "Shell/process spawning detected. Verify this is intentional.",
+        "mcp_attack": "MCP tool accessing sensitive data. Review the MCP server.",
+        "git_hooks": "Git hooks can execute arbitrary code. Review carefully.",
         "evasion": "Encoding/evasion detected. May be hiding malicious payload.",
         "destructive": "Destructive command detected. Verify intent before allowing.",
         "privilege_escalation": "Privilege escalation attempt. Review necessity.",
