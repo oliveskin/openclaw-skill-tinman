@@ -4,6 +4,12 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, evasion attacks, memory poisoning, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
+## What's New in v0.6.1
+
+- Update eval dependency to `tinman-openclaw-eval>=0.3.2` (288 probes, updated category aliases).
+- Update skill metadata (`skills/tinman/SKILL.md`) and requirements for Clawdhub upload.
+- Remove non-ASCII glyphs in docs/output to avoid terminal/packaging encoding issues.
+
 ## What's New in v0.6.0
 
 ### Real-Time Security Checking (Agent Self-Protection)
@@ -103,7 +109,7 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 /tinman report                       # View latest findings
 
 # Proactive security sweep
-/tinman sweep                        # Run 270+ attack probes
+/tinman sweep                        # Run 288 attack probes
 /tinman sweep --category tool_exfil  # Focus on exfiltration
 /tinman sweep --category financial   # Crypto wallet attacks
 /tinman sweep --category evasion_bypass  # Encoding tricks
@@ -125,7 +131,7 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 | **Context Bleed** | 14 | Cross-session leaks, memory extraction |
 | **Privilege Escalation** | 15 | Sandbox escape, elevation bypass |
 | **Supply Chain** | 18 | Malicious skills, dependency attacks |
-| **Financial/Crypto** | 26 | BTC/ETH/SOL/Base wallets, exchange APIs, transaction signing |
+| **Financial Transaction** | 26 | Wallet/seed theft, exchange APIs, transaction signing |
 | **Unauthorized Action** | 28 | Actions without consent, implicit execution |
 | **MCP Attacks** | 20 | MCP tool abuse, server injection, cross-MCP exfil |
 | **Indirect Injection** | 20 | Injection via files, URLs, documents, configs |
@@ -159,26 +165,20 @@ The skill detects suspicious tool calls including:
 
 ## How It Works
 
-1. **Check**: Agent calls `/tinman check` before executing tools → Returns SAFE/REVIEW/BLOCKED verdict → Agent self-polices based on security mode
-2. **Scan**: Fetches recent sessions → Converts to Tinman trace format → Runs FailureClassifier
-3. **Sweep**: Runs synthetic attack probes → Tests defenses → Reports vulnerabilities
-4. **Watch**: Connects to Gateway WebSocket → Streams events in real-time → Classifies failures as they happen
+1. **Check**: Agent calls `/tinman check` before executing tools -> returns SAFE/REVIEW/BLOCKED -> agent self-polices based on mode
+2. **Scan**: Fetches recent sessions -> converts to Tinman trace format -> runs FailureClassifier
+3. **Sweep**: Runs synthetic attack probes -> tests defenses -> reports vulnerabilities
+4. **Watch**: Connects to Gateway WebSocket -> streams events in real-time -> classifies failures as they happen
 5. **Report**: Generates actionable findings with OpenClaw-specific mitigations
 
 ### Agent Self-Protection Flow
 
 ```
-User Request → Agent Plans Tool Call → /tinman check tool args
-                                              ↓
-                            ┌─────────────────┼─────────────────┐
-                            ↓                 ↓                 ↓
-                          SAFE             REVIEW            BLOCKED
-                            ↓                 ↓                 ↓
-                        Proceed         Ask Human*           Refuse
-                                              ↓
-                                    [Approve] [Deny]
-                                              ↓
-                              Proceed or Add to Allowlist
+User Request -> Agent Plans Tool Call -> /tinman check <tool> <args>
+                                     |
+                                     +-> SAFE    -> Proceed
+                                     +-> REVIEW  -> Ask Human* -> Approve/Deny -> Proceed or Refuse
+                                     +-> BLOCKED -> Refuse
 
 * In 'risky' mode, REVIEW auto-approves. In 'yolo' mode, BLOCKED only warns.
 ```
@@ -195,7 +195,7 @@ User Request → Agent Plans Tool Call → /tinman check tool args
 - OpenClaw (any recent version)
 - Python 3.10+
 - AgentTinman >= 0.2.1
-- tinman-openclaw-eval >= 0.3.0
+- tinman-openclaw-eval >= 0.3.2
 
 ## Links
 

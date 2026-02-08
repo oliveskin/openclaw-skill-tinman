@@ -12,7 +12,6 @@ import json
 import os
 import re
 import signal
-import sys
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -23,18 +22,19 @@ from urllib.parse import unquote
 
 # Tinman imports
 try:
-    from tinman import Tinman, create_tinman, OperatingMode, Settings
-    from tinman.ingest import Trace, Span, SpanStatus
-    from tinman.taxonomy.failure_types import FailureClass, Severity
     from tinman.taxonomy.classifiers import FailureClassifier
+    from tinman.taxonomy.failure_types import FailureClass
+    from tinman.ingest import Span, SpanStatus, Trace
+
     TINMAN_AVAILABLE = True
 except ImportError:
     TINMAN_AVAILABLE = False
-    print("Warning: AgentTinman not installed. Run: pip install AgentTinman>=0.1.60")
+    print("Warning: AgentTinman not installed. Run: pip install AgentTinman>=0.2.1")
 
 # Eval harness imports (for sweep command)
 try:
-    from tinman_openclaw_eval import EvalHarness, AttackCategory, Severity as EvalSeverity
+    from tinman_openclaw_eval import AttackCategory, EvalHarness
+
     EVAL_AVAILABLE = True
 except ImportError:
     EVAL_AVAILABLE = False
@@ -46,9 +46,9 @@ try:
         MonitorConfig,
         FileAlerter,
         ConsoleAlerter,
-        Finding,
     )
     from tinman_openclaw_eval.adapters.openclaw import OpenClawAdapter
+
     GATEWAY_AVAILABLE = True
 except ImportError:
     GATEWAY_AVAILABLE = False
@@ -67,23 +67,27 @@ ALLOWLIST_FILE = WORKSPACE / "tinman-allowlist.json"
 # Security Check System
 # =============================================================================
 
+
 class SecurityMode(Enum):
     """Protection modes for security checking."""
-    SAFER = "safer"   # Default: ask human for REVIEW, block BLOCKED
-    RISKY = "risky"   # Auto-approve REVIEW, still block S4
-    YOLO = "yolo"     # Warn only, never block (for testing/research)
+
+    SAFER = "safer"  # Default: ask human for REVIEW, block BLOCKED
+    RISKY = "risky"  # Auto-approve REVIEW, still block S3-S4
+    YOLO = "yolo"  # Warn only, never block (for testing/research)
 
 
 class Verdict(Enum):
     """Security check verdict levels."""
-    SAFE = "SAFE"         # Proceed automatically
-    REVIEW = "REVIEW"     # Ask human for approval (S1-S2)
-    BLOCKED = "BLOCKED"   # Refuse automatically (S3-S4)
+
+    SAFE = "SAFE"  # Proceed automatically
+    REVIEW = "REVIEW"  # Ask human for approval (S1-S2)
+    BLOCKED = "BLOCKED"  # Refuse automatically (S3-S4)
 
 
 @dataclass
 class CheckResult:
     """Result of a security check."""
+
     verdict: Verdict
     severity: str  # S0-S4
     confidence: float  # 0.0-1.0
@@ -115,27 +119,30 @@ class CheckResult:
         }
 
         # Adjust verdict display based on mode
+        icon = icons[self.verdict]
+        status = self.verdict.value
         if mode == SecurityMode.YOLO and self.verdict == Verdict.BLOCKED:
-            icon = "⚠️"
+            icon = "[WARN]"
             status = f"WARNED (YOLO mode - would be {self.verdict.value})"
         elif mode == SecurityMode.RISKY and self.verdict == Verdict.REVIEW:
-            icon = "✅"
-            status = f"AUTO-APPROVED (risky mode)"
-        else:
-            icon = icons[self.verdict]
-            status = self.verdict.value
+            icon = "[AUTO]"
+            status = "AUTO-APPROVED (risky mode)"
 
         output = f"""
 {icon} {status} ({self.severity})
-{'=' * 50}
+{"=" * 50}
 Reason: {self.reason}
 Category: {self.category}
 Confidence: {self.confidence:.0%}
-Patterns: {', '.join(self.patterns_matched) if self.patterns_matched else 'None'}
+Patterns: {", ".join(self.patterns_matched) if self.patterns_matched else "None"}
 
 Recommendation: {self.recommendation}
 """
-        if self.ask_human and self.verdict == Verdict.REVIEW and mode == SecurityMode.SAFER:
+        if (
+            self.ask_human
+            and self.verdict == Verdict.REVIEW
+            and mode == SecurityMode.SAFER
+        ):
             output += f"""
 Human approval needed:
   {self.ask_human}
@@ -159,6 +166,7 @@ def set_security_mode(mode: SecurityMode) -> None:
     config = load_config()
     config["security_mode"] = mode.value
     import yaml
+
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(yaml.dump(config, default_flow_style=False))
 
@@ -219,94 +227,172 @@ def is_allowlisted(tool_name: str, args_str: str) -> bool:
 PATTERN_CATEGORIES = {
     "credential_theft": [
         # SSH/Keys
-        ".ssh", "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
+        ".ssh",
+        "id_rsa",
+        "id_ed25519",
+        "authorized_keys",
+        "known_hosts",
         # Environment/secrets
-        ".env", "credentials", "secret", "token", "apikey", "api_key",
+        ".env",
+        "credentials",
+        "secret",
+        "token",
+        "apikey",
+        "api_key",
         # Cloud credentials
-        ".aws", ".azure", ".gcloud", ".kube",
+        ".aws",
+        ".azure",
+        ".gcloud",
+        ".kube",
         # Package managers
-        ".npmrc", ".pypirc", ".gem/credentials", "cargo/credentials",
+        ".npmrc",
+        ".pypirc",
+        ".gem/credentials",
+        "cargo/credentials",
         # Docker
         ".docker/config",
         # Database
-        ".pgpass", ".my.cnf", "mongodump", "pg_dump", "mysqldump", "redis-cli",
+        ".pgpass",
+        ".my.cnf",
+        "mongodump",
+        "pg_dump",
+        "mysqldump",
+        "redis-cli",
         # Password managers
-        "1password", "bitwarden", ".config/op",
+        "1password",
+        "bitwarden",
+        ".config/op",
         # Terraform
-        "tfstate", ".terraform",
+        "tfstate",
+        ".terraform",
         # Git credentials
-        ".git-credentials", ".netrc",
+        ".git-credentials",
+        ".netrc",
         # GPG
-        ".gnupg", "gpg --export",
+        ".gnupg",
+        "gpg --export",
         # System
-        "password", "passwd", "shadow", "/etc/sudoers",
+        "password",
+        "passwd",
+        "shadow",
+        "/etc/sudoers",
     ],
     "crypto_wallet": [
-        "wallet", ".bitcoin", ".ethereum", "keystore", ".solana", ".config/solana",
-        "phantom", "metamask", ".base", "coinbase", "ledger", "trezor",
-        "seed phrase", "mnemonic", "recovery phrase"
+        "wallet",
+        ".bitcoin",
+        ".ethereum",
+        "keystore",
+        ".solana",
+        ".config/solana",
+        "phantom",
+        "metamask",
+        ".base",
+        "coinbase",
+        "ledger",
+        "trezor",
+        "seed phrase",
+        "mnemonic",
+        "recovery phrase",
     ],
-    "browser_data": [
-        "Cookies", "Login Data", "Chrome", "Firefox", "Safari", "Brave"
-    ],
+    "browser_data": ["Cookies", "Login Data", "Chrome", "Firefox", "Safari", "Brave"],
     "windows_attack": [
         # Mimikatz/credential dumping
-        "mimikatz", "sekurlsa", "lsadump", "procdump", "lsass",
+        "mimikatz",
+        "sekurlsa",
+        "lsadump",
+        "procdump",
+        "lsass",
         # Scheduled tasks
-        "schtasks", "/create /tn", "/ru SYSTEM",
+        "schtasks",
+        "/create /tn",
+        "/ru SYSTEM",
         # PowerShell
-        "powershell", "-enc", "-encodedcommand", "iex", "invoke-expression",
-        "downloadstring", "downloadfile", "net.webclient",
-        "-ep bypass", "-executionpolicy bypass", "amsiutils",
+        "powershell",
+        "-enc",
+        "-encodedcommand",
+        "iex",
+        "invoke-expression",
+        "downloadstring",
+        "downloadfile",
+        "net.webclient",
+        "-ep bypass",
+        "-executionpolicy bypass",
+        "amsiutils",
         # Certutil
-        "certutil", "-urlcache", "-decode", "-encode",
+        "certutil",
+        "-urlcache",
+        "-decode",
+        "-encode",
         # Registry
-        "reg add", "reg save", "reg export",
-        "hklm\\sam", "hklm\\system", "currentversion\\run",
+        "reg add",
+        "reg save",
+        "reg export",
+        "hklm\\sam",
+        "hklm\\system",
+        "currentversion\\run",
         # WMI
-        "wmic", "process call create", "__eventfilter",
+        "wmic",
+        "process call create",
+        "__eventfilter",
     ],
     "macos_attack": [
-        "dump-keychain", "find-generic-password", "login.keychain",
-        "osascript", "launchagents", "launchdaemons", ".plist",
-        "launchctl", "login item"
+        "dump-keychain",
+        "find-generic-password",
+        "login.keychain",
+        "osascript",
+        "launchagents",
+        "launchdaemons",
+        ".plist",
+        "launchctl",
+        "login item",
     ],
     "linux_persistence": [
-        "crontab", "nohup", "systemctl", "systemctl enable", "systemctl start",
-        "/etc/systemd", "systemd/system", "systemd/user",
-        "/proc/", "/proc/*/mem", "/proc/*/environ", "/proc/*/maps"
+        "crontab",
+        "nohup",
+        "systemctl",
+        "systemctl enable",
+        "systemctl start",
+        "/etc/systemd",
+        "systemd/system",
+        "systemd/user",
+        "/proc/",
+        "/proc/*/mem",
+        "/proc/*/environ",
+        "/proc/*/maps",
     ],
     "network_exfil": [
-        "curl", "wget", "nc ", "netcat", "ncat", "scp ", "rsync",
-        "ftp", "sftp", "nslookup", "dig "
+        "curl",
+        "wget",
+        "nc ",
+        "netcat",
+        "ncat",
+        "scp ",
+        "rsync",
+        "ftp",
+        "sftp",
+        "nslookup",
+        "dig ",
     ],
     "cloud_metadata": [
-        "169.254.169.254", "metadata/identity", "computemetadata", "meta-data/iam"
+        "169.254.169.254",
+        "metadata/identity",
+        "computemetadata",
+        "meta-data/iam",
     ],
-    "container_escape": [
-        "--privileged", "-v /:/", "docker.sock", "chroot"
-    ],
-    "shell_injection": [
-        "$(", "`", "${", "ifs=", "; ", "| sh", "| bash"
-    ],
-    "process_spawn": [
-        "/bin/sh", "/bin/bash", "exec ", "eval "
-    ],
-    "mcp_attack": [
-        "mcp_", "mcp_password", "mcp_secret", "mcp_credential", "mcp_token"
-    ],
+    "container_escape": ["--privileged", "-v /:/", "docker.sock", "chroot"],
+    "shell_injection": ["$(", "`", "${", "ifs=", "; ", "| sh", "| bash"],
+    "process_spawn": ["/bin/sh", "/bin/bash", "exec ", "eval "],
+    "mcp_attack": ["mcp_", "mcp_password", "mcp_secret", "mcp_credential", "mcp_token"],
     "git_hooks": [
-        ".git/hooks", "git-templates", "pre-commit", "post-checkout", "post-merge"
+        ".git/hooks",
+        "git-templates",
+        "pre-commit",
+        "post-checkout",
+        "post-merge",
     ],
-    "evasion": [
-        "base64", "\\x", "\\0", "%2f"
-    ],
-    "destructive": [
-        "rm -rf", "rm -r", "mkfs", "dd if=", "> /dev/", "shred"
-    ],
-    "privilege_escalation": [
-        "sudo", "chmod 777", "chmod +x", "chown", "setuid"
-    ],
+    "evasion": ["base64", "\\x", "\\0", "%2f"],
+    "destructive": ["rm -rf", "rm -r", "mkfs", "dd if=", "> /dev/", "shred"],
+    "privilege_escalation": ["sudo", "chmod 777", "chmod +x", "chown", "setuid"],
 }
 
 # Severity mapping: S4 = critical, S3 = high, S2 = medium, S1 = low
@@ -327,6 +413,14 @@ SEVERITY_MAP = {
     "evasion": "S2",
     "destructive": "S3",
     "privilege_escalation": "S3",
+}
+
+SEVERITY_RANK = {
+    "S0": 0,
+    "S1": 1,
+    "S2": 2,
+    "S3": 3,
+    "S4": 4,
 }
 
 
@@ -367,7 +461,7 @@ def _get_human_question(category: str, tool: str, args: str) -> str:
     """Generate a human-friendly approval question."""
     questions = {
         "network_exfil": f"Allow network request? Tool: {tool}",
-        "evasion": f"Encoded/obfuscated command detected. Allow execution?",
+        "evasion": "Encoded/obfuscated command detected. Allow execution?",
         "destructive": f"This will delete/modify data. Proceed with: {tool}?",
         "privilege_escalation": f"Elevated privileges requested. Allow {tool}?",
     }
@@ -375,7 +469,9 @@ def _get_human_question(category: str, tool: str, args: str) -> str:
     return questions.get(category, default)
 
 
-def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> CheckResult:
+def run_check(
+    tool_name: str, args: Any, mode: SecurityMode | None = None
+) -> CheckResult:
     """
     Check if a tool call is safe to execute.
 
@@ -419,7 +515,7 @@ def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> Ch
             if pattern in args_lower or pattern in tool_lower:
                 patterns_matched.append(pattern)
                 cat_severity = SEVERITY_MAP.get(category, "S2")
-                if cat_severity > highest_severity:
+                if SEVERITY_RANK[cat_severity] > SEVERITY_RANK[highest_severity]:
                     highest_severity = cat_severity
                 if category not in categories_found:
                     categories_found.append(category)
@@ -430,10 +526,19 @@ def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> Ch
     # Base64 detection
     try:
         for word in args_str.split():
-            if len(word) > 10 and word.replace('=', '').isalnum():
+            if len(word) > 10 and word.replace("=", "").isalnum():
                 try:
-                    decoded = base64.b64decode(word).decode('utf-8', errors='ignore').lower()
-                    sensitive = ['.ssh', '.env', 'password', 'secret', 'wallet', 'credential']
+                    decoded = (
+                        base64.b64decode(word).decode("utf-8", errors="ignore").lower()
+                    )
+                    sensitive = [
+                        ".ssh",
+                        ".env",
+                        "password",
+                        "secret",
+                        "wallet",
+                        "credential",
+                    ]
                     if any(s in decoded for s in sensitive):
                         patterns_matched.append(f"base64:{word[:20]}...")
                         evasion_detected = True
@@ -446,9 +551,17 @@ def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> Ch
 
     # Unicode normalization check
     try:
-        normalized = unicodedata.normalize('NFKC', args_str).lower()
+        normalized = unicodedata.normalize("NFKC", args_str).lower()
         if normalized != args_lower:
-            sensitive = ['.ssh', '.env', 'passwd', 'shadow', 'secret', 'credential', 'wallet']
+            sensitive = [
+                ".ssh",
+                ".env",
+                "passwd",
+                "shadow",
+                "secret",
+                "credential",
+                "wallet",
+            ]
             if any(s in normalized for s in sensitive):
                 patterns_matched.append("unicode_bypass")
                 evasion_detected = True
@@ -463,23 +576,23 @@ def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> Ch
         pass
 
     # Hex/octal/URL encoding check
-    if re.search(r'\\x[0-9a-f]{2}', args_lower):
+    if re.search(r"\\x[0-9a-f]{2}", args_lower):
         patterns_matched.append("hex_encoding")
         evasion_detected = True
-    if re.search(r'\\[0-7]{3}', args_lower):
+    if re.search(r"\\[0-7]{3}", args_lower):
         patterns_matched.append("octal_encoding")
         evasion_detected = True
-    if re.search(r'%[0-9a-f]{2}', args_lower):
+    if re.search(r"%[0-9a-f]{2}", args_lower):
         try:
             decoded = unquote(args_lower)
-            sensitive = ['.ssh', '.env', 'passwd', 'shadow', 'secret', 'wallet']
+            sensitive = [".ssh", ".env", "passwd", "shadow", "secret", "wallet"]
             if any(s in decoded for s in sensitive):
                 patterns_matched.append("url_encoding")
                 evasion_detected = True
         except Exception:
             pass
 
-    if evasion_detected and highest_severity < "S2":
+    if evasion_detected and SEVERITY_RANK[highest_severity] < SEVERITY_RANK["S2"]:
         highest_severity = "S2"
 
     # Determine verdict based on findings
@@ -499,7 +612,9 @@ def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> Ch
     # Primary category is highest severity one
     primary_category = categories_found[0] if categories_found else "unknown"
     for cat in categories_found:
-        if SEVERITY_MAP.get(cat, "S0") >= SEVERITY_MAP.get(primary_category, "S0"):
+        if SEVERITY_RANK.get(SEVERITY_MAP.get(cat, "S0"), 0) >= SEVERITY_RANK.get(
+            SEVERITY_MAP.get(primary_category, "S0"), 0
+        ):
             primary_category = cat
 
     # Determine verdict based on severity
@@ -518,7 +633,9 @@ def run_check(tool_name: str, args: Any, mode: SecurityMode | None = None) -> Ch
         category=primary_category.replace("_", " ").title(),
         recommendation=_get_recommendation(primary_category, patterns_matched[0]),
         patterns_matched=patterns_matched[:5],  # Limit to top 5
-        ask_human=_get_human_question(primary_category, tool_name, args_str) if verdict == Verdict.REVIEW else None,
+        ask_human=_get_human_question(primary_category, tool_name, args_str)
+        if verdict == Verdict.REVIEW
+        else None,
     )
 
 
@@ -555,6 +672,7 @@ def load_config() -> dict[str, Any]:
     """Load Tinman configuration from workspace."""
     if CONFIG_FILE.exists():
         import yaml
+
         return yaml.safe_load(CONFIG_FILE.read_text()) or {}
     return {
         "mode": "shadow",
@@ -667,8 +785,11 @@ def convert_session_to_trace(session: dict) -> Trace:
             attributes={
                 "role": role,
                 "content_length": len(content) if isinstance(content, str) else 0,
+                "content": content if isinstance(content, str) else "",
                 "has_tool_calls": len(tool_calls) > 0,
-                "tool_names": [tc.get("name", "") for tc in tool_calls] if tool_calls else [],
+                "tool_names": [tc.get("name", "") for tc in tool_calls]
+                if tool_calls
+                else [],
                 "channel": channel,
             },
             status=SpanStatus.OK,
@@ -690,12 +811,14 @@ def convert_session_to_trace(session: dict) -> Trace:
                 name=f"tool.{tc.get('name', 'unknown')}",
                 start_time=ts,
                 end_time=ts,
-                service_name=f"openclaw.tools",
+                service_name="openclaw.tools",
                 kind="client",
                 attributes={
                     "tool.name": tc.get("name", ""),
                     "tool.args": json.dumps(tc.get("args", tc.get("input", {}))),
-                    "tool.result_truncated": tc.get("result", "")[:500] if tc.get("result") else "",
+                    "tool.result_truncated": tc.get("result", "")[:500]
+                    if tc.get("result")
+                    else "",
                 },
                 status=SpanStatus.ERROR if tc.get("error") else SpanStatus.OK,
             )
@@ -708,7 +831,7 @@ def convert_session_to_trace(session: dict) -> Trace:
             "channel": channel,
             "peer": session.get("peer", session.get("user", "")),
             "model": session.get("model", ""),
-        }
+        },
     )
 
 
@@ -750,35 +873,40 @@ async def analyze_traces(traces: list[Trace], focus: str = "all") -> list[dict]:
 
                 # Only report if confidence is reasonable
                 if result.confidence >= 0.3:
-                    findings.append({
-                        "session_id": trace.trace_id,
-                        "span_id": span.span_id,
-                        "channel": trace.metadata.get("channel", "unknown"),
-                        "timestamp": span.start_time.isoformat(),
-                        "primary_class": result.primary_class.value,
-                        "secondary_class": result.secondary_class,
-                        "severity": result.suggested_severity,
-                        "confidence": result.confidence,
-                        "reasoning": result.reasoning,
-                        "indicators": result.indicators_matched[:5],
-                    })
+                    findings.append(
+                        {
+                            "session_id": trace.trace_id,
+                            "span_id": span.span_id,
+                            "channel": trace.metadata.get("channel", "unknown"),
+                            "timestamp": span.start_time.isoformat(),
+                            "primary_class": result.primary_class.value,
+                            "secondary_class": result.secondary_class,
+                            "severity": result.suggested_severity,
+                            "confidence": result.confidence,
+                            "reasoning": result.reasoning,
+                            "indicators": result.indicators_matched[:5],
+                        }
+                    )
 
-            # Check tool calls for suspicious patterns
-            tool_names = span.attributes.get("tool_names", [])
-            for tool_name in tool_names:
-                if _is_suspicious_tool(tool_name, span.attributes.get("tool.args", "")):
-                    findings.append({
-                        "session_id": trace.trace_id,
-                        "span_id": span.span_id,
-                        "channel": trace.metadata.get("channel", "unknown"),
-                        "timestamp": span.start_time.isoformat(),
-                        "primary_class": "tool_use",
-                        "secondary_class": "suspicious_tool_call",
-                        "severity": "S2",
-                        "confidence": 0.7,
-                        "reasoning": f"Suspicious tool call: {tool_name}",
-                        "indicators": [f"tool:{tool_name}"],
-                    })
+            # Check tool spans for suspicious patterns
+            if span.name.startswith("tool."):
+                tool_name = str(span.attributes.get("tool.name", ""))
+                tool_args = span.attributes.get("tool.args", "")
+                if _is_suspicious_tool(tool_name, tool_args):
+                    findings.append(
+                        {
+                            "session_id": trace.trace_id,
+                            "span_id": span.span_id,
+                            "channel": trace.metadata.get("channel", "unknown"),
+                            "timestamp": span.start_time.isoformat(),
+                            "primary_class": "tool_use",
+                            "secondary_class": "suspicious_tool_call",
+                            "severity": "S2",
+                            "confidence": 0.7,
+                            "reasoning": f"Suspicious tool call: {tool_name}",
+                            "indicators": [f"tool:{tool_name}"],
+                        }
+                    )
 
     return findings
 
@@ -818,11 +946,11 @@ def generate_report(findings: list[dict], sessions_count: int) -> str:
 |--------|-------|
 | Sessions analyzed | {sessions_count} |
 | Failures detected | {len(findings)} |
-| Critical (S4) | {severity_counts['S4']} |
-| High (S3) | {severity_counts['S3']} |
-| Medium (S2) | {severity_counts['S2']} |
-| Low (S1) | {severity_counts['S1']} |
-| Info (S0) | {severity_counts['S0']} |
+| Critical (S4) | {severity_counts["S4"]} |
+| High (S3) | {severity_counts["S3"]} |
+| Medium (S2) | {severity_counts["S2"]} |
+| Low (S1) | {severity_counts["S1"]} |
+| Info (S0) | {severity_counts["S0"]} |
 
 """
 
@@ -834,20 +962,22 @@ def generate_report(findings: list[dict], sessions_count: int) -> str:
 
     # Sort by severity (S4 first)
     severity_order = {"S4": 0, "S3": 1, "S2": 2, "S1": 3, "S0": 4}
-    sorted_findings = sorted(findings, key=lambda x: severity_order.get(x.get("severity", "S0"), 5))
+    sorted_findings = sorted(
+        findings, key=lambda x: severity_order.get(x.get("severity", "S0"), 5)
+    )
 
     for i, f in enumerate(sorted_findings[:20], 1):  # Limit to top 20
         sev = f.get("severity", "S0")
-        report += f"""### [{sev}] {f.get('primary_class', 'unknown').replace('_', ' ').title()}
+        report += f"""### [{sev}] {f.get("primary_class", "unknown").replace("_", " ").title()}
 
-**Session:** {f.get('channel', 'unknown')}/{f.get('session_id', 'unknown')[:8]}
-**Time:** {f.get('timestamp', 'unknown')}
-**Confidence:** {f.get('confidence', 0):.0%}
-**Type:** {f.get('secondary_class', 'unknown')}
+**Session:** {f.get("channel", "unknown")}/{f.get("session_id", "unknown")[:8]}
+**Time:** {f.get("timestamp", "unknown")}
+**Confidence:** {f.get("confidence", 0):.0%}
+**Type:** {f.get("secondary_class", "unknown")}
 
-**Analysis:** {f.get('reasoning', 'No details')}
+**Analysis:** {f.get("reasoning", "No details")}
 
-**Indicators:** {', '.join(f.get('indicators', [])[:3]) or 'None'}
+**Indicators:** {", ".join(f.get("indicators", [])[:3]) or "None"}
 
 **Suggested Mitigation:** {_get_mitigation(f)}
 
@@ -995,7 +1125,7 @@ async def run_watch_realtime(gateway_url: str, analysis_interval: int = 5) -> No
     """Real-time monitoring via OpenClaw Gateway WebSocket."""
     if not GATEWAY_AVAILABLE:
         print("Error: Gateway monitoring not available.")
-        print("Install: pip install AgentTinman>=0.1.60 tinman-openclaw-eval>=0.1.2")
+        print("Install: pip install AgentTinman>=0.2.1 tinman-openclaw-eval>=0.3.2")
         return
 
     print(f"Connecting to OpenClaw Gateway at {gateway_url}...")
@@ -1036,7 +1166,7 @@ async def run_watch_realtime(gateway_url: str, analysis_interval: int = 5) -> No
         await run_watch_polling(analysis_interval)
     finally:
         stats = monitor.get_stats()
-        print(f"\nWatch session stats:")
+        print("\nWatch session stats:")
         print(f"  Events received: {stats['events_received']}")
         print(f"  Traces created: {stats['traces_created']}")
         print(f"  Findings: {stats['findings_count']}")
@@ -1069,18 +1199,45 @@ async def run_sweep(category: str = "all", severity: str = "S2") -> None:
     # Initialize eval harness
     harness = EvalHarness(use_tinman=TINMAN_AVAILABLE)
 
-    # Map category string to AttackCategory
+    # Map category string to AttackCategory (compatible with multiple eval versions)
     category_map = {
         "all": None,
-        "prompt_injection": AttackCategory.PROMPT_INJECTION,
-        "tool_exfil": AttackCategory.TOOL_EXFIL,
-        "context_bleed": AttackCategory.CONTEXT_BLEED,
-        "privilege_escalation": AttackCategory.PRIVILEGE_ESCALATION,
+        "prompt_injection": "prompt_injection",
+        "tool_exfil": "tool_exfil",
+        "context_bleed": "context_bleed",
+        "privilege_escalation": "privilege_escalation",
+        "supply_chain": "supply_chain",
+        "financial": "financial",
+        "unauthorized_action": "unauthorized_action",
+        "mcp_attack": "mcp_attack",
+        "mcp_attacks": "mcp_attacks",
+        "indirect_injection": "indirect_injection",
+        "evasion_bypass": "evasion_bypass",
+        "memory_poisoning": "memory_poisoning",
+        "platform_specific": "platform_specific",
     }
 
     categories = None
     if category != "all" and category in category_map:
-        categories = [category_map[category]]
+        try:
+            parse = getattr(AttackCategory, "parse", None)
+            if callable(parse):
+                resolved = parse(category_map[category])
+            else:
+                legacy_aliases = {
+                    "financial": "financial_transaction",
+                    "mcp_attacks": "mcp_attack",
+                }
+                resolved = AttackCategory(
+                    legacy_aliases.get(category_map[category], category_map[category])
+                )
+            categories = [resolved]
+        except Exception as e:
+            print(
+                f"Error: category '{category}' is not supported by installed tinman-openclaw-eval."
+            )
+            print(f"Details: {e}")
+            return
 
     # Run the sweep
     result = await harness.run(
@@ -1096,16 +1253,18 @@ async def run_sweep(category: str = "all", severity: str = "S2") -> None:
     SWEEP_FILE.parent.mkdir(parents=True, exist_ok=True)
     SWEEP_FILE.write_text(report)
 
-    print(f"\nSweep complete!")
+    print("\nSweep complete!")
     print(f"Results written to: {SWEEP_FILE}")
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Total attacks: {result.total_attacks}")
     print(f"  Passed (blocked): {result.passed}")
     print(f"  Failed: {result.failed}")
     print(f"  Vulnerabilities: {result.vulnerabilities}")
 
     if result.vulnerabilities > 0:
-        print(f"\n⚠️  WARNING: {result.vulnerabilities} potential vulnerabilities found!")
+        print(
+            f"\n[WARN] WARNING: {result.vulnerabilities} potential vulnerabilities found!"
+        )
         print("Review the sweep report for details.")
 
 
@@ -1123,7 +1282,7 @@ def generate_sweep_report(result) -> str:
 | Blocked (Passed) | {result.passed} |
 | Not Blocked (Failed) | {result.failed} |
 | **Vulnerabilities** | **{result.vulnerabilities}** |
-| Tinman Analysis | {'Enabled' if result.tinman_enabled else 'Disabled'} |
+| Tinman Analysis | {"Enabled" if result.tinman_enabled else "Disabled"} |
 
 """
 
@@ -1143,7 +1302,7 @@ def generate_sweep_report(result) -> str:
             report += f"""### [{v.severity.value}] {v.attack_name}
 
 **ID:** `{v.attack_id}`
-**Category:** {v.category.value.replace('_', ' ').title()}
+**Category:** {v.category.value.replace("_", " ").title()}
 **Expected:** {v.expected.value}
 **Actual:** {v.actual.value}
 
@@ -1152,9 +1311,9 @@ def generate_sweep_report(result) -> str:
             tinman_analysis = v.details.get("tinman_analysis")
             if tinman_analysis:
                 report += f"""**Tinman Analysis:**
-- Primary Class: {tinman_analysis.get('primary_class', 'N/A')}
-- Confidence: {tinman_analysis.get('confidence', 0):.0%}
-- Severity: {tinman_analysis.get('severity', 'N/A')}
+- Primary Class: {tinman_analysis.get("primary_class", "N/A")}
+- Confidence: {tinman_analysis.get("confidence", 0):.0%}
+- Severity: {tinman_analysis.get("severity", "N/A")}
 
 """
             report += "---\n\n"
@@ -1205,9 +1364,12 @@ def main():
     # scan command
     scan_parser = subparsers.add_parser("scan", help="Analyze recent sessions")
     scan_parser.add_argument("--hours", type=int, default=24, help="Hours to analyze")
-    scan_parser.add_argument("--focus", default="all",
-                            choices=["all", "prompt_injection", "tool_use", "context_bleed", "reasoning"],
-                            help="Focus area")
+    scan_parser.add_argument(
+        "--focus",
+        default="all",
+        choices=["all", "prompt_injection", "tool_use", "context_bleed", "reasoning"],
+        help="Focus area",
+    )
 
     # report command
     report_parser = subparsers.add_parser("report", help="Show findings report")
@@ -1215,20 +1377,51 @@ def main():
 
     # watch command
     watch_parser = subparsers.add_parser("watch", help="Continuous monitoring")
-    watch_parser.add_argument("--interval", type=int, default=60, help="Interval in minutes")
+    watch_parser.add_argument(
+        "--interval", type=int, default=60, help="Interval in minutes"
+    )
     watch_parser.add_argument("--stop", action="store_true", help="Stop watching")
-    watch_parser.add_argument("--gateway", default="ws://127.0.0.1:18789", help="Gateway WebSocket URL")
-    watch_parser.add_argument("--mode", default="realtime", choices=["realtime", "polling"],
-                             help="Monitoring mode: realtime (WebSocket) or polling (periodic scans)")
+    watch_parser.add_argument(
+        "--gateway", default="ws://127.0.0.1:18789", help="Gateway WebSocket URL"
+    )
+    watch_parser.add_argument(
+        "--mode",
+        default="realtime",
+        choices=["realtime", "polling"],
+        help="Monitoring mode: realtime (WebSocket) or polling (periodic scans)",
+    )
 
     # sweep command
-    sweep_parser = subparsers.add_parser("sweep", help="Security sweep with synthetic probes")
-    sweep_parser.add_argument("--category", default="all",
-                             choices=["all", "prompt_injection", "tool_exfil", "context_bleed", "privilege_escalation"],
-                             help="Attack category")
-    sweep_parser.add_argument("--severity", default="S2",
-                             choices=["S0", "S1", "S2", "S3", "S4"],
-                             help="Minimum severity level")
+    sweep_parser = subparsers.add_parser(
+        "sweep", help="Security sweep with synthetic probes"
+    )
+    sweep_parser.add_argument(
+        "--category",
+        default="all",
+        choices=[
+            "all",
+            "prompt_injection",
+            "tool_exfil",
+            "context_bleed",
+            "privilege_escalation",
+            "supply_chain",
+            "financial",
+            "unauthorized_action",
+            "mcp_attack",
+            "mcp_attacks",
+            "indirect_injection",
+            "evasion_bypass",
+            "memory_poisoning",
+            "platform_specific",
+        ],
+        help="Attack category",
+    )
+    sweep_parser.add_argument(
+        "--severity",
+        default="S2",
+        choices=["S0", "S1", "S2", "S3", "S4"],
+        help="Minimum severity level",
+    )
 
     # check command - security check before tool execution
     check_parser = subparsers.add_parser("check", help="Check if a tool call is safe")
@@ -1238,20 +1431,32 @@ def main():
 
     # mode command - set security mode
     mode_parser = subparsers.add_parser("mode", help="Set security mode")
-    mode_parser.add_argument("level", nargs="?", choices=["safer", "risky", "yolo"],
-                            help="Security level (safer=default, risky=auto-approve low risk, yolo=warn only)")
+    mode_parser.add_argument(
+        "level",
+        nargs="?",
+        choices=["safer", "risky", "yolo"],
+        help="Security level (safer=default, risky=auto-approve low risk, yolo=warn only)",
+    )
 
     # allow command - add to allowlist
     allow_parser = subparsers.add_parser("allow", help="Add to allowlist")
     allow_parser.add_argument("item", help="Pattern, domain, or tool to allow")
-    allow_parser.add_argument("--type", dest="list_type", default="patterns",
-                             choices=["patterns", "domains", "tools"],
-                             help="Allowlist type")
+    allow_parser.add_argument(
+        "--type",
+        dest="list_type",
+        default="patterns",
+        choices=["patterns", "domains", "tools"],
+        help="Allowlist type",
+    )
 
     # allowlist command - manage allowlist
     allowlist_parser = subparsers.add_parser("allowlist", help="Manage allowlist")
-    allowlist_parser.add_argument("--show", action="store_true", help="Show current allowlist")
-    allowlist_parser.add_argument("--clear", action="store_true", help="Clear allowlist")
+    allowlist_parser.add_argument(
+        "--show", action="store_true", help="Show current allowlist"
+    )
+    allowlist_parser.add_argument(
+        "--clear", action="store_true", help="Clear allowlist"
+    )
 
     args = parser.parse_args()
 
@@ -1288,7 +1493,9 @@ def main():
             if new_mode == SecurityMode.YOLO:
                 print("WARNING: YOLO mode only warns, never blocks. Use with caution!")
             elif new_mode == SecurityMode.RISKY:
-                print("Note: Low-risk actions will be auto-approved. S4 threats still blocked.")
+                print(
+                    "Note: Low-risk actions will be auto-approved. S3-S4 threats still blocked."
+                )
         else:
             current = get_security_mode()
             print(f"Current security mode: {current.value}")

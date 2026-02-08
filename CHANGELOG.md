@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-02-08
+
+### Changed
+- Update eval dependency to `tinman-openclaw-eval>=0.3.2` (288 probes, updated categories/aliases).
+- Update skill metadata and docs to reflect current probe count and category names.
+- Remove remaining non-ASCII warning glyphs to avoid encoding issues in terminals/Clawdhub packaging.
+
 ## [0.6.0] - 2026-02-01
 
 ### Added
