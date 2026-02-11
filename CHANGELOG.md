@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2026-02-08
+
+### Added
+- Local live event stream for dashboards/visualizers: emits `~/.openclaw/workspace/tinman-events.jsonl`.
+- `/tinman scan`, `/tinman sweep`, and `/tinman watch` now append structured JSONL events (best-effort, never breaks skill execution).
+
+### Changed
+- `watch` now blocks non-loopback Gateway URLs by default; remote endpoints require `--allow-remote-gateway`.
+- JSONL event emission now applies basic redaction/truncation for obvious secret-like values.
+
 ## [0.6.1] - 2026-02-08
 
 ### Changed

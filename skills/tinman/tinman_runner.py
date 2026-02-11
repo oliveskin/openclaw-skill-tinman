@@ -13,12 +13,14 @@ import os
 import re
 import signal
 import unicodedata
+import uuid
+from ipaddress import ip_address
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 # Tinman imports
 try:
@@ -46,6 +48,7 @@ try:
         MonitorConfig,
         FileAlerter,
         ConsoleAlerter,
+        CallbackAlerter,
     )
     from tinman_openclaw_eval.adapters.openclaw import OpenClawAdapter
 
@@ -61,6 +64,128 @@ SWEEP_FILE = WORKSPACE / "tinman-sweep.md"
 CONFIG_FILE = WORKSPACE / "tinman.yaml"
 WATCH_PID_FILE = WORKSPACE / "tinman-watch.pid"
 ALLOWLIST_FILE = WORKSPACE / "tinman-allowlist.json"
+EVENTS_FILE = WORKSPACE / "tinman-events.jsonl"
+
+
+# -----------------------------------------------------------------------------
+# Oilcan live event stream (local JSONL)
+# -----------------------------------------------------------------------------
+
+
+def _utc_iso() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _truncate(value: Any, limit: int = 280) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    value = value.replace("\r", " ").replace("\n", " ").strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 3)] + "..."
+
+
+_SENSITIVE_EVENT_PATTERNS = [
+    re.compile(r"(?i)\b(sk-[a-z0-9]{20,})\b"),
+    re.compile(r"(?i)\b(ghp_[a-z0-9]{20,})\b"),
+    re.compile(r"(?i)\b(AKIA[0-9A-Z]{16})\b"),
+    re.compile(r"(?i)\b(ASIA[0-9A-Z]{16})\b"),
+]
+
+_SENSITIVE_EVENT_MARKERS = [
+    "id_rsa",
+    "id_ed25519",
+    "aws_secret_access_key",
+    "openai_api_key",
+    "anthropic_api_key",
+    "/var/run/secrets/",
+]
+
+
+def _sanitize_event_text(value: str) -> str:
+    sanitized = value
+    for pattern in _SENSITIVE_EVENT_PATTERNS:
+        sanitized = pattern.sub("[REDACTED]", sanitized)
+    for marker in _SENSITIVE_EVENT_MARKERS:
+        sanitized = re.sub(re.escape(marker), "[REDACTED]", sanitized, flags=re.IGNORECASE)
+    return sanitized
+
+
+def _sanitize_event_meta(value: Any) -> Any:
+    if isinstance(value, str):
+        return _truncate(_sanitize_event_text(value), limit=200)
+    if isinstance(value, list):
+        return [_sanitize_event_meta(v) for v in value[:50]]
+    if isinstance(value, dict):
+        return {str(k): _sanitize_event_meta(v) for k, v in value.items()}
+    return value
+
+
+def emit_event(
+    kind: str,
+    *,
+    severity: str | None = None,
+    category: str | None = None,
+    title: str | None = None,
+    message: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    """Best-effort append of a single JSONL event for the local Oilcan bridge.
+
+    This must never break the skill execution path.
+    """
+    try:
+        EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+        record: dict[str, Any] = {
+            "v": 1,
+            "id": uuid.uuid4().hex[:12],
+            "ts": _utc_iso(),
+            "kind": kind,
+        }
+        if severity:
+            record["severity"] = severity
+        if category:
+            record["category"] = category
+        if title:
+            record["title"] = _truncate(_sanitize_event_text(title), limit=120)
+        if message:
+            record["message"] = _truncate(_sanitize_event_text(message))
+        if meta:
+            record["meta"] = _sanitize_event_meta(meta)
+
+        with open(EVENTS_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
+
+
+def _is_loopback_gateway(gateway_url: str) -> bool:
+    try:
+        parsed = urlparse(gateway_url)
+    except Exception:
+        return False
+
+    if parsed.scheme not in {"ws", "wss"}:
+        return False
+    if not parsed.hostname:
+        return False
+
+    host = parsed.hostname.lower()
+    if host == "localhost":
+        return True
+
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 # =============================================================================
@@ -1013,14 +1138,29 @@ def _get_mitigation(finding: dict) -> str:
 async def run_scan(hours: int = 24, focus: str = "all") -> None:
     """Main scan command."""
     print(f"Scanning last {hours} hours for {focus} failure modes...")
+    emit_event(
+        "scan_start",
+        message=f"scan: last {hours}h focus={focus}",
+        meta={"hours": hours, "focus": focus},
+    )
 
     # Get sessions
     sessions = await get_sessions(hours)
     if not sessions:
         print("No sessions found. Export sessions first or check workspace path.")
+        emit_event(
+            "scan_empty",
+            message="scan: no sessions found",
+            meta={"hours": hours, "focus": focus},
+        )
         return
 
     print(f"Found {len(sessions)} sessions to analyze")
+    emit_event(
+        "scan_sessions",
+        message=f"scan: {len(sessions)} sessions",
+        meta={"sessions": len(sessions)},
+    )
 
     # Convert to traces
     traces = [convert_session_to_trace(s) for s in sessions]
@@ -1038,10 +1178,32 @@ async def run_scan(hours: int = 24, focus: str = "all") -> None:
     print(f"\nFindings written to: {FINDINGS_FILE}")
     print(f"Total findings: {len(findings)}")
 
+    s4 = sum(1 for f in findings if f.get("severity") == "S4")
+    s3 = sum(1 for f in findings if f.get("severity") == "S3")
+    emit_event(
+        "scan_end",
+        message=f"scan: {len(findings)} findings",
+        meta={"sessions": len(sessions), "findings": len(findings), "s4": s4, "s3": s3},
+    )
+
+    for f in findings[:200]:
+        emit_event(
+            "finding",
+            severity=f.get("severity", "S0"),
+            category=f.get("primary_class", "unknown"),
+            title=f.get("secondary_class", "unknown"),
+            message=f.get("reasoning", ""),
+            meta={
+                "confidence": f.get("confidence"),
+                "session_id": str(f.get("session_id", ""))[:12],
+                "channel": f.get("channel"),
+                "span_id": str(f.get("span_id", ""))[:12],
+                "indicators": f.get("indicators", [])[:5],
+            },
+        )
+
     # Print summary
     if findings:
-        s4 = sum(1 for f in findings if f.get("severity") == "S4")
-        s3 = sum(1 for f in findings if f.get("severity") == "S3")
         if s4 > 0:
             print(f"CRITICAL: {s4} S4 findings require immediate attention!")
         if s3 > 0:
@@ -1063,6 +1225,7 @@ async def run_watch(
     stop: bool = False,
     gateway_url: str = "ws://127.0.0.1:18789",
     mode: str = "realtime",
+    allow_remote_gateway: bool = False,
 ) -> None:
     """Continuous monitoring mode.
 
@@ -1071,14 +1234,21 @@ async def run_watch(
         stop: Stop watching
         gateway_url: WebSocket URL for OpenClaw Gateway
         mode: 'realtime' (WebSocket) or 'polling' (periodic scans)
+        allow_remote_gateway: Allow non-loopback gateway targets
     """
     if stop:
         if WATCH_PID_FILE.exists():
             try:
                 pid = int(WATCH_PID_FILE.read_text().strip())
+                emit_event(
+                    "watch_stop_request",
+                    message="watch: stop requested",
+                    meta={"pid": pid},
+                )
                 os.kill(pid, signal.SIGTERM)
                 WATCH_PID_FILE.unlink()
                 print(f"Stopped watch mode (PID {pid})")
+                emit_event("watch_stop", message="watch: stopped", meta={"pid": pid})
             except ValueError:
                 print("Error: Invalid PID file")
                 WATCH_PID_FILE.unlink()
@@ -1089,6 +1259,7 @@ async def run_watch(
                 print(f"Error: Cannot stop process (PID {pid}). Try manually.")
         else:
             print("Watch mode is not running")
+            emit_event("watch_stop", message="watch: stop requested but not running")
         return
 
     # Check if already running
@@ -1103,10 +1274,49 @@ async def run_watch(
             # Stale PID file, remove it
             WATCH_PID_FILE.unlink()
 
+    if mode == "realtime" and not stop:
+        if not _is_loopback_gateway(gateway_url) and not allow_remote_gateway:
+            print(
+                "Error: Refusing remote gateway URL by default."
+                " Use --allow-remote-gateway only for trusted endpoints."
+            )
+            print(f"Rejected gateway: {gateway_url}")
+            emit_event(
+                "watch_config_blocked",
+                severity="S2",
+                category="gateway",
+                title="Remote gateway blocked",
+                message="watch: blocked remote gateway target",
+                meta={"gateway_url": gateway_url, "reason": "non_loopback_without_override"},
+            )
+            return
+        if not _is_loopback_gateway(gateway_url) and allow_remote_gateway:
+            print(
+                "Warning: using non-loopback gateway. Ensure endpoint is trusted and internal."
+            )
+            emit_event(
+                "watch_config_warning",
+                severity="S1",
+                category="gateway",
+                title="Remote gateway enabled",
+                message="watch: remote gateway override enabled",
+                meta={"gateway_url": gateway_url},
+            )
+
     # Write PID file
     WATCH_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     WATCH_PID_FILE.write_text(str(os.getpid()))
     print(f"Started watch mode (PID {os.getpid()})")
+    emit_event(
+        "watch_start",
+        message=f"watch: started mode={mode}",
+        meta={
+            "mode": mode,
+            "gateway_url": gateway_url,
+            "interval_minutes": interval_minutes,
+            "pid": os.getpid(),
+        },
+    )
 
     try:
         # Real-time mode with gateway monitoring
@@ -1119,6 +1329,7 @@ async def run_watch(
         # Clean up PID file on exit
         if WATCH_PID_FILE.exists():
             WATCH_PID_FILE.unlink()
+        emit_event("watch_stop", message="watch: stopped")
 
 
 async def run_watch_realtime(gateway_url: str, analysis_interval: int = 5) -> None:
@@ -1150,6 +1361,25 @@ async def run_watch_realtime(gateway_url: str, analysis_interval: int = 5) -> No
     WATCH_FINDINGS = WORKSPACE / "tinman-watch.md"
     monitor.add_alerter(ConsoleAlerter())
     monitor.add_alerter(FileAlerter(WATCH_FINDINGS, append=True))
+    monitor.add_alerter(
+        CallbackAlerter(
+            lambda findings: [
+                emit_event(
+                    "watch_finding",
+                    severity=getattr(f, "severity", None),
+                    category=getattr(f, "category", None),
+                    title=getattr(f, "title", None),
+                    message=getattr(f, "description", None) or getattr(f, "title", ""),
+                    meta={
+                        "finding_id": getattr(f, "finding_id", None),
+                        "trace_id": getattr(f, "trace_id", None),
+                    },
+                )
+                for f in findings
+            ],
+            alerter_name="oilcan-jsonl",
+        )
+    )
 
     print(f"Writing findings to: {WATCH_FINDINGS}")
     print(f"Analysis interval: {analysis_interval} minutes")
@@ -1170,6 +1400,17 @@ async def run_watch_realtime(gateway_url: str, analysis_interval: int = 5) -> No
         print(f"  Events received: {stats['events_received']}")
         print(f"  Traces created: {stats['traces_created']}")
         print(f"  Findings: {stats['findings_count']}")
+        emit_event(
+            "watch_stats",
+            message="watch: session stats",
+            meta={
+                "events_received": stats.get("events_received"),
+                "traces_created": stats.get("traces_created"),
+                "findings_count": stats.get("findings_count"),
+                "connected": stats.get("connected"),
+                "adapter": stats.get("adapter"),
+            },
+        )
 
 
 async def run_watch_polling(interval_minutes: int = 60) -> None:
@@ -1195,6 +1436,11 @@ async def run_sweep(category: str = "all", severity: str = "S2") -> None:
         return
 
     print(f"Running security sweep (category: {category}, min severity: {severity})...")
+    emit_event(
+        "sweep_start",
+        message=f"sweep: category={category} min={severity}",
+        meta={"category": category, "min_severity": severity},
+    )
 
     # Initialize eval harness
     harness = EvalHarness(use_tinman=TINMAN_AVAILABLE)
@@ -1245,6 +1491,36 @@ async def run_sweep(category: str = "all", severity: str = "S2") -> None:
         min_severity=severity,
         max_concurrent=3,
     )
+
+    emit_event(
+        "sweep_end",
+        message=f"sweep: total={result.total_attacks} failed={result.failed} vulns={result.vulnerabilities}",
+        meta={
+            "total_attacks": result.total_attacks,
+            "passed": result.passed,
+            "failed": result.failed,
+            "vulnerabilities": result.vulnerabilities,
+            "tinman_enabled": getattr(result, "tinman_enabled", False),
+        },
+    )
+
+    # Emit only notable per-attack results (vulns + non-blocked)
+    for r in getattr(result, "results", [])[:1000]:
+        if getattr(r, "is_vulnerability", False) or not getattr(r, "passed", True):
+            emit_event(
+                "sweep_result",
+                severity=getattr(getattr(r, "severity", None), "value", None) or "S0",
+                category=getattr(getattr(r, "category", None), "value", None) or "unknown",
+                title=getattr(r, "attack_name", "attack"),
+                message=("VULN" if getattr(r, "is_vulnerability", False) else "NOT_BLOCKED"),
+                meta={
+                    "attack_id": getattr(r, "attack_id", None),
+                    "passed": getattr(r, "passed", None),
+                    "is_vulnerability": getattr(r, "is_vulnerability", None),
+                    "expected": getattr(getattr(r, "expected", None), "value", None),
+                    "actual": getattr(getattr(r, "actual", None), "value", None),
+                },
+            )
 
     # Generate sweep report
     report = generate_sweep_report(result)
@@ -1385,6 +1661,11 @@ def main():
         "--gateway", default="ws://127.0.0.1:18789", help="Gateway WebSocket URL"
     )
     watch_parser.add_argument(
+        "--allow-remote-gateway",
+        action="store_true",
+        help="Allow non-loopback gateway URLs (trusted endpoints only)",
+    )
+    watch_parser.add_argument(
         "--mode",
         default="realtime",
         choices=["realtime", "polling"],
@@ -1467,7 +1748,15 @@ def main():
     elif args.command == "report":
         asyncio.run(show_report(args.full))
     elif args.command == "watch":
-        asyncio.run(run_watch(args.interval, args.stop, args.gateway, args.mode))
+        asyncio.run(
+            run_watch(
+                args.interval,
+                args.stop,
+                args.gateway,
+                args.mode,
+                args.allow_remote_gateway,
+            )
+        )
     elif args.command == "sweep":
         asyncio.run(run_sweep(args.category, args.severity))
     elif args.command == "check":

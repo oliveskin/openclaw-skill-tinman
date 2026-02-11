@@ -4,6 +4,16 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, evasion attacks, memory poisoning, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
+## What's New in v0.6.2
+
+- Emit structured local events to `~/.openclaw/workspace/tinman-events.jsonl` during:
+  - `/tinman scan` (scan lifecycle + per-finding events)
+  - `/tinman sweep` (sweep lifecycle + per-attack notable results)
+  - `/tinman watch` (watch lifecycle + realtime finding events when Gateway monitoring is available)
+- This enables always-on local dashboards/visualizers (e.g. Oilcan) without cloud services.
+- Harden watch defaults: remote Gateway URLs now require explicit `--allow-remote-gateway` opt-in.
+- Event stream output now applies basic redaction/truncation for obvious secret-like values.
+
 ## What's New in v0.6.1
 
 - Update eval dependency to `tinman-openclaw-eval>=0.3.2` (288 probes, updated category aliases).
