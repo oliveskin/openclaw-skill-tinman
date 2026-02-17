@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.3] - 2026-02-17
+
+### Added
+- `/tinman oilcan` command for plain-language Oilcan setup and stream status.
+- `/tinman oilcan --json` for machine-readable status output.
+
+### Changed
+- Update skill metadata/description to include Oilcan event streaming and setup helper.
+- Add feedback/updates contact reference to `@cantshutup_`.
+
 ## [0.6.2] - 2026-02-08
 
 ### Added

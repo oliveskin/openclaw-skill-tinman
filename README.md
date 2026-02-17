@@ -4,6 +4,14 @@ AI security scanner for [OpenClaw](https://openclaw.ai) - powered by [AgentTinma
 
 Discovers prompt injection, tool exfil, context bleed, evasion attacks, memory poisoning, and other security issues in your AI assistant sessions, then proposes mitigations mapped to OpenClaw's security controls.
 
+Feedback/updates: [@cantshutup_](https://x.com/cantshutup_)
+
+## What's New in v0.6.3
+
+- Add `/tinman oilcan` command for plain-language Oilcan setup and local stream status.
+- Add JSON status mode: `/tinman oilcan --json` for automation/scripts.
+- Clarify loopback-first dashboard guidance and mention bridge auto-port behavior when the preferred port is busy.
+
 ## What's New in v0.6.2
 
 - Emit structured local events to `~/.openclaw/workspace/tinman-events.jsonl` during:
@@ -118,6 +126,11 @@ In any OpenClaw channel (WhatsApp, Telegram, Discord, etc.):
 # View findings
 /tinman report                       # View latest findings
 
+# Oilcan dashboard helper
+/tinman oilcan                       # Plain-language setup + status
+/tinman oilcan --json                # JSON status output
+/tinman oilcan --bridge-port 18128   # Expected local bridge port
+
 # Proactive security sweep
 /tinman sweep                        # Run 288 attack probes
 /tinman sweep --category tool_exfil  # Focus on exfiltration
@@ -211,8 +224,10 @@ User Request -> Agent Plans Tool Call -> /tinman check <tool> <args>
 
 - [AgentTinman](https://github.com/oliveskin/Agent-Tinman) - AI Failure Mode Research
 - [Eval Harness](https://github.com/oliveskin/tinman-openclaw-eval) - Security Testing
+- [Oilcan](https://github.com/oliveskin/oilcan) - Local dashboard for Tinman events
 - [OpenClaw](https://github.com/openclaw/openclaw) - Personal AI Assistant
 - [ClawHub](https://clawhub.ai/oliveskin/agent-tinman) - Skill Registry
+- Feedback/updates: [@cantshutup_](https://x.com/cantshutup_)
 
 ## License
 

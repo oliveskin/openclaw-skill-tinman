@@ -188,6 +188,117 @@ def _is_loopback_gateway(gateway_url: str) -> bool:
         return False
 
 
+def _parse_event_ts(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _count_recent_events(hours: int = 24) -> int:
+    if not EVENTS_FILE.exists():
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    count = 0
+    try:
+        with open(EVENTS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = _parse_event_ts(record.get("ts"))
+                if ts and ts >= cutoff:
+                    count += 1
+    except Exception:
+        return 0
+
+    return count
+
+
+def show_oilcan_status(bridge_port: int = 18128, as_json: bool = False) -> None:
+    """Show user-friendly Oilcan setup/status for Tinman event streaming."""
+    if bridge_port < 1 or bridge_port > 65535:
+        bridge_port = 18128
+
+    events_exists = EVENTS_FILE.exists()
+    events_size = EVENTS_FILE.stat().st_size if events_exists else 0
+    recent_events = _count_recent_events(hours=24)
+
+    snapshot_url = f"http://127.0.0.1:{bridge_port}/snapshot"
+    events_url = f"http://127.0.0.1:{bridge_port}/events"
+
+    payload = {
+        "events_file": str(EVENTS_FILE),
+        "events_exists": events_exists,
+        "events_size_bytes": events_size,
+        "recent_events_24h": recent_events,
+        "bridge": {
+            "host": "127.0.0.1",
+            "port": bridge_port,
+            "snapshot_url": snapshot_url,
+            "events_url": events_url,
+            "start_command": "node bridge/server.mjs",
+        },
+        "ui": {
+            "dev_command": "npm run dev",
+        },
+    }
+
+    emit_event(
+        "oilcan_status",
+        category="oilcan",
+        message="oilcan setup/status requested",
+        meta={
+            "events_exists": events_exists,
+            "recent_events_24h": recent_events,
+            "bridge_port_hint": bridge_port,
+        },
+    )
+
+    if as_json:
+        print(json.dumps(payload, indent=2))
+        return
+
+    print("Tinman + Oilcan Setup")
+    print("=" * 50)
+    print(f"Event stream file: {EVENTS_FILE}")
+    if events_exists:
+        print(
+            f"Status: OK ({recent_events} events in last 24h, {events_size} bytes on disk)"
+        )
+    else:
+        print("Status: waiting for first events.")
+        print("Run /tinman scan or /tinman sweep first to generate events.")
+
+    print("")
+    print("Start Oilcan:")
+    print("  1) In the Oilcan repo: npm install && npm run dev")
+    print("  2) Start bridge: node bridge/server.mjs")
+    print(f"  3) Import snapshot URL in Oilcan: {snapshot_url}")
+    print(f"     Live stream endpoint: {events_url}")
+    print("")
+    print(
+        "Note: if the preferred bridge port is already in use, Oilcan can auto-select"
+    )
+    print("the next available port and prints the exact URL at startup.")
+    print("Keep bridge binding on 127.0.0.1 unless LAN access is explicitly required.")
+
+
 # =============================================================================
 # Security Check System
 # =============================================================================
@@ -1704,6 +1815,18 @@ def main():
         help="Minimum severity level",
     )
 
+    # oilcan command - show local dashboard setup/status
+    oilcan_parser = subparsers.add_parser(
+        "oilcan", help="Show Oilcan dashboard setup and stream status"
+    )
+    oilcan_parser.add_argument(
+        "--bridge-port",
+        type=int,
+        default=18128,
+        help="Expected local Oilcan bridge port",
+    )
+    oilcan_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
     # check command - security check before tool execution
     check_parser = subparsers.add_parser("check", help="Check if a tool call is safe")
     check_parser.add_argument("tool", help="Tool name (e.g., bash, read, write)")
@@ -1759,6 +1882,8 @@ def main():
         )
     elif args.command == "sweep":
         asyncio.run(run_sweep(args.category, args.severity))
+    elif args.command == "oilcan":
+        show_oilcan_status(args.bridge_port, args.json)
     elif args.command == "check":
         mode = get_security_mode()
         result = run_check(args.tool, args.args, mode)
